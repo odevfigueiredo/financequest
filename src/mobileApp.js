@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Image,
+  Animated,
+  Easing,
   Platform,
   Pressable,
   ScrollView,
@@ -18,42 +19,59 @@ import {
   APP_NAME,
   CHARACTER_CLASSES,
   CHARACTER_RACES,
+  INVESTMENT_CATEGORIES,
+  INVESTMENT_TYPES,
   ITEM_LIBRARY,
   SLOT_ORDER,
 } from './gameData.js';
 import {
+  ITEM_MAP,
   analyzeInvestmentPayload,
+  analyzeOcrText,
+  autoEquipBestDrops,
   buildCsv,
+  calculateDropChances,
   calculateProfilePower,
   createInitialGameState,
-  equipFirstCompatibleItem,
+  equipItem,
   formatCompact,
   formatCurrency,
   getAchievementStatuses,
   getActiveSetBonuses,
   getAdvisorLine,
+  getEquipmentMultipliers,
   getHistorySummary,
+  getInvestmentTypesByCategory,
   getLevelState,
-  getNextItemReward,
   getOwnedItems,
   getQuestStatuses,
   getRarityMeta,
+  parseCurrencyInput,
+  rollItemDrops,
   shortHash,
 } from './mobileGameLogic.js';
 
-const APP_ICON = require('../assets/icon.png');
-const STORAGE_KEY = 'finance-quest-state-v2';
+const STORAGE_KEY = 'finance-quest-state-v3';
+const USD_BRL_RATE = 5.1;
 
 const TABS = [
-  { key: 'inicio', label: 'Início', icon: 'home-analytics' },
+  { key: 'inicio', label: 'Início', icon: 'home-variant' },
   { key: 'missoes', label: 'Missões', icon: 'flag-checkered' },
   { key: 'validacao', label: 'Validar', icon: 'text-box-check-outline' },
-  { key: 'marcos', label: 'Marcos', icon: 'view-grid-plus-outline' },
-  { key: 'perfil', label: 'Perfil', icon: 'account-circle-outline' },
+  { key: 'inventario', label: 'Inventário', icon: 'bag-personal' },
+  { key: 'perfil', label: 'Perfil', icon: 'account-circle' },
 ];
 
-const SAMPLE_RECEIPT =
+const OCR_SAMPLE =
   'Compra confirmada de Tesouro Selic no valor total de R$ 1.250,00. Objetivo: reserva de emergência.';
+
+const RARITY_ORDER = {
+  comum: 1,
+  raro: 2,
+  epico: 3,
+  lendario: 4,
+  artefato: 5,
+};
 
 function loadState() {
   if (Platform.OS !== 'web') {
@@ -76,23 +94,101 @@ function persistState(nextState) {
   try {
     globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(nextState));
   } catch {
-    // Persistência é opcional no web preview.
+    // A persistência é opcional no preview web.
   }
 }
 
-function ProgressBar({ value, color = '#2DD4BF' }) {
+function clamp(value, min = 0, max = 1) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function formatPercent(value = 0) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
+function formatMultiplier(value = 1) {
+  return `${Number(value || 1).toFixed(2).replace('.', ',')}x`;
+}
+
+function getCategoryLabel(categoryKey) {
+  return INVESTMENT_CATEGORIES.find((entry) => entry.key === categoryKey)?.label || 'Categoria';
+}
+
+function getTypeConfig(typeKey) {
+  return INVESTMENT_TYPES[typeKey] || INVESTMENT_TYPES['tesouro-selic'];
+}
+
+function getBestDrop(drops = []) {
+  return [...drops].sort((a, b) => (RARITY_ORDER[b.rarity] || 0) - (RARITY_ORDER[a.rarity] || 0))[0] || null;
+}
+
+function ProgressBar({ value, color = '#72E6C7' }) {
   return (
     <View style={styles.progressTrack}>
-      <View style={[styles.progressFill, { width: `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`, backgroundColor: color }]} />
+      <View
+        style={[
+          styles.progressFill,
+          {
+            width: `${Math.round(clamp(value) * 100)}%`,
+            backgroundColor: color,
+          },
+        ]}
+      />
     </View>
   );
 }
 
-function Chip({ children, tone = 'teal' }) {
-  const chipStyle = tone === 'amber' ? styles.chipAmber : tone === 'coral' ? styles.chipCoral : styles.chipTeal;
+function PrimaryButton({ children, icon, onPress, disabled = false, tone = 'emerald', compact = false }) {
+  const colors =
+    tone === 'amber'
+      ? ['#FFD166', '#F59E0B']
+      : tone === 'rose'
+        ? ['#FF8A9A', '#F43F5E']
+        : ['#72E6C7', '#5AC8FA'];
+
   return (
-    <View style={[styles.chip, chipStyle]}>
-      <Text style={styles.chipText}>{children}</Text>
+    <Pressable
+      accessibilityRole="button"
+      onPress={disabled ? undefined : onPress}
+      style={[styles.buttonWrap, compact && styles.buttonCompact, disabled && styles.disabled]}
+    >
+      <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primaryButton}>
+        {icon ? <MaterialCommunityIcons name={icon} size={18} color="#07111F" /> : null}
+        <Text style={styles.primaryButtonText} numberOfLines={1}>
+          {children}
+        </Text>
+      </LinearGradient>
+    </Pressable>
+  );
+}
+
+function GhostButton({ children, icon, onPress, compact = false }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.ghostButton, compact && styles.ghostButtonCompact]}>
+      {icon ? <MaterialCommunityIcons name={icon} size={17} color="#D8E7F3" /> : null}
+      <Text style={styles.ghostButtonText} numberOfLines={1}>
+        {children}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ChoiceChip({ label, icon, selected, onPress, compact = false }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.choiceChip, selected && styles.choiceChipActive, compact && styles.choiceChipCompact]}>
+      {icon ? <MaterialCommunityIcons name={icon} size={17} color={selected ? '#07111F' : '#C9D8E5'} /> : null}
+      <Text style={[styles.choiceText, selected && styles.choiceTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function RarityPill({ rarity }) {
+  const meta = getRarityMeta(rarity);
+  return (
+    <View style={[styles.rarityPill, { borderColor: meta.color, backgroundColor: `${meta.aura}22` }]}>
+      <Text style={[styles.rarityText, { color: meta.color }]}>{meta.label}</Text>
     </View>
   );
 }
@@ -109,37 +205,95 @@ function SectionHeader({ eyebrow, title, right }) {
   );
 }
 
-function StatCard({ icon, label, value, color = '#2DD4BF' }) {
+function StatTile({ icon, label, value, color = '#72E6C7' }) {
   return (
-    <View style={styles.statCard}>
-      <MaterialCommunityIcons name={icon} size={20} color={color} />
+    <View style={styles.statTile}>
+      <MaterialCommunityIcons name={icon} size={19} color={color} />
       <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statValue} numberOfLines={1}>
+        {value}
+      </Text>
     </View>
-  );
-}
-
-function PrimaryButton({ children, icon, onPress, disabled = false, tone = 'teal' }) {
-  const colors = tone === 'amber' ? ['#F6C453', '#EBAA2A'] : tone === 'coral' ? ['#FF8B7E', '#F25F4C'] : ['#2DD4BF', '#5AC8FA'];
-
-  return (
-    <Pressable onPress={disabled ? undefined : onPress} style={[styles.buttonWrap, disabled && styles.disabled]}>
-      <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primaryButton}>
-        {icon ? <MaterialCommunityIcons name={icon} size={18} color="#07111F" /> : null}
-        <Text style={styles.primaryButtonText}>{children}</Text>
-      </LinearGradient>
-    </Pressable>
   );
 }
 
 function TabButton({ tab, active, onPress }) {
   return (
-    <Pressable testID={`tab-${tab.key}`} onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
-      <MaterialCommunityIcons name={tab.icon} size={22} color={active ? '#07111F' : '#C7D7E5'} />
+    <Pressable testID={`tab-${tab.key}`} accessibilityRole="button" onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
+      <MaterialCommunityIcons name={tab.icon} size={21} color={active ? '#07111F' : '#C9D8E5'} />
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]} numberOfLines={1}>
         {tab.label}
       </Text>
     </Pressable>
+  );
+}
+
+function MagicBurst({ event }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.82)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!event) {
+      return undefined;
+    }
+
+    opacity.setValue(0);
+    scale.setValue(0.82);
+    rotate.setValue(0);
+
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }),
+        Animated.delay(1250),
+        Animated.timing(opacity, { toValue: 0, duration: 420, useNativeDriver: true }),
+      ]),
+      Animated.spring(scale, { toValue: 1, friction: 6, tension: 90, useNativeDriver: true }),
+      Animated.timing(rotate, { toValue: 1, duration: 1600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+
+    return undefined;
+  }, [event, opacity, rotate, scale]);
+
+  if (!event) {
+    return null;
+  }
+
+  const meta = getRarityMeta(event.rarity || 'comum');
+  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '18deg'] });
+  const particles = [0, 1, 2, 3, 4, 5, 6, 7];
+
+  return (
+    <Animated.View pointerEvents="none" style={[styles.magicOverlay, { opacity }]}>
+      <Animated.View
+        style={[
+          styles.magicCard,
+          {
+            borderColor: meta.color,
+            transform: [{ scale }, { rotate: spin }],
+            shadowColor: meta.aura,
+          },
+        ]}
+      >
+        {particles.map((particle) => (
+          <View
+            key={particle}
+            style={[
+              styles.magicParticle,
+              {
+                backgroundColor: particle % 2 ? meta.color : '#FFFFFF',
+                transform: [{ rotate: `${particle * 45}deg` }, { translateY: -62 }],
+              },
+            ]}
+          />
+        ))}
+        <View style={[styles.magicIcon, { backgroundColor: `${meta.aura}55` }]}>
+          <MaterialCommunityIcons name={event.type === 'level' ? 'creation' : 'auto-fix'} size={44} color={meta.color} />
+        </View>
+        <Text style={styles.magicTitle}>{event.title}</Text>
+        <Text style={styles.magicSubtitle}>{event.subtitle}</Text>
+      </Animated.View>
+    </Animated.View>
   );
 }
 
@@ -150,18 +304,21 @@ function CreationScreen({ onCreate }) {
   const isValid = name.trim().length >= 3;
 
   return (
-    <LinearGradient colors={['#07111F', '#0B1726', '#102033']} style={styles.creation}>
+    <LinearGradient colors={['#07111F', '#102236', '#122E3A']} style={styles.creation}>
       <StatusBar barStyle="light-content" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.creationContent}>
         <View style={styles.creationHero}>
-          <Image source={APP_ICON} style={styles.logo} />
+          <LinearGradient colors={['#72E6C7', '#5AC8FA']} style={styles.logoCrest}>
+            <MaterialCommunityIcons name="shield-sword" size={38} color="#07111F" />
+            <Text style={styles.logoText}>FQ</Text>
+          </LinearGradient>
           <Text style={styles.appName}>{APP_NAME}</Text>
           <Text style={styles.creationSubtitle}>
-            Uma jornada educacional para transformar comprovantes, metas e investimentos em aprendizado prático.
+            Crie seu aventureiro financeiro, registre aportes reais e transforme educação financeira em uma jornada de RPG.
           </Text>
         </View>
 
-        <View style={styles.creationPanel}>
+        <View style={styles.panel}>
           <Text style={styles.inputLabel}>Nome do usuário</Text>
           <TextInput
             value={name}
@@ -172,39 +329,41 @@ function CreationScreen({ onCreate }) {
             maxLength={24}
           />
 
-          <Text style={styles.inputLabel}>Perfil de aprendizagem</Text>
-          <View style={styles.optionGrid}>
+          <Text style={styles.inputLabel}>Origem do personagem</Text>
+          <View style={styles.optionStack}>
             {CHARACTER_RACES.map((entry) => (
               <Pressable
                 key={entry.key}
                 onPress={() => setRace(entry.key)}
-                style={[styles.option, race === entry.key && styles.optionActive]}
+                style={[styles.optionRow, race === entry.key && styles.optionRowActive]}
               >
-                <Text style={styles.optionTitle}>{entry.label}</Text>
-                <Text style={styles.optionText}>{entry.bonus}</Text>
+                <MaterialCommunityIcons name={entry.key === 'guardiao' ? 'shield' : entry.key === 'arcanista' ? 'chart-timeline-variant' : 'scale-balance'} size={20} color={race === entry.key ? '#07111F' : '#72E6C7'} />
+                <View style={styles.optionTextWrap}>
+                  <Text style={[styles.optionTitle, race === entry.key && styles.optionTitleActive]}>{entry.label}</Text>
+                  <Text style={[styles.optionText, race === entry.key && styles.optionTextActive]}>{entry.bonus}</Text>
+                </View>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.inputLabel}>Trilha financeira</Text>
-          <View style={styles.optionGrid}>
+          <Text style={styles.inputLabel}>Classe financeira</Text>
+          <View style={styles.optionStack}>
             {CHARACTER_CLASSES.map((entry) => (
               <Pressable
                 key={entry.key}
                 onPress={() => setClassKey(entry.key)}
-                style={[styles.option, classKey === entry.key && styles.optionActive]}
+                style={[styles.optionRow, classKey === entry.key && styles.optionRowActive]}
               >
-                <Text style={styles.optionTitle}>{entry.label}</Text>
-                <Text style={styles.optionText}>{entry.bonus}</Text>
+                <MaterialCommunityIcons name={entry.key === 'renda-fixa' ? 'castle' : entry.key === 'diversificacao' ? 'compass' : 'timer-sand'} size={20} color={classKey === entry.key ? '#07111F' : '#72E6C7'} />
+                <View style={styles.optionTextWrap}>
+                  <Text style={[styles.optionTitle, classKey === entry.key && styles.optionTitleActive]}>{entry.label}</Text>
+                  <Text style={[styles.optionText, classKey === entry.key && styles.optionTextActive]}>{entry.bonus}</Text>
+                </View>
               </Pressable>
             ))}
           </View>
 
-          <PrimaryButton
-            icon="rocket-launch-outline"
-            disabled={!isValid}
-            onPress={() => onCreate({ name: name.trim(), race, classKey })}
-          >
+          <PrimaryButton icon="sword-cross" disabled={!isValid} onPress={() => onCreate({ name: name.trim(), race, classKey })}>
             Começar jornada
           </PrimaryButton>
         </View>
@@ -213,861 +372,1559 @@ function CreationScreen({ onCreate }) {
   );
 }
 
-function MissionRow({ mission }) {
+function HomeView({ state, summary, power, levelState, multipliers, setTab }) {
+  const advisorLine = getAdvisorLine({ history: state.history, summary, equipment: state.equipment, inventory: state.inventory });
+  const latest = state.history[0];
+  const activeSets = getActiveSetBonuses(state.equipment);
+  const equippedItems = multipliers.equippedItems;
+
   return (
-    <View style={styles.listCard}>
-      <View style={styles.listIcon}>
-        <MaterialCommunityIcons name={mission.completed ? 'check-bold' : 'progress-clock'} size={18} color={mission.completed ? '#07111F' : '#F6C453'} />
+    <View style={styles.screenStack}>
+      <LinearGradient colors={['#173B4B', '#143047', '#241F45']} style={styles.heroPanel}>
+        <View style={styles.heroTop}>
+          <View>
+            <Text style={styles.eyebrowLight}>Aventureiro financeiro</Text>
+            <Text style={styles.heroTitle}>{state.player.name}</Text>
+          </View>
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelLabel}>Nível</Text>
+            <Text style={styles.levelNumber}>{levelState.level}</Text>
+          </View>
+        </View>
+        <Text style={styles.heroCopy}>{advisorLine}</Text>
+        <View style={styles.xpRow}>
+          <Text style={styles.xpLabel}>XP {formatCompact(levelState.totalXp)}</Text>
+          <Text style={styles.xpLabel}>{formatPercent(levelState.progress)}</Text>
+        </View>
+        <ProgressBar value={levelState.progress} color="#FFD166" />
+        <View style={styles.heroActions}>
+          <PrimaryButton icon="auto-fix" compact onPress={() => setTab('validacao')}>
+            Validar
+          </PrimaryButton>
+          <GhostButton icon="bag-personal" compact onPress={() => setTab('inventario')}>
+            Inventário
+          </GhostButton>
+        </View>
+      </LinearGradient>
+
+      <View style={styles.statsGrid}>
+        <StatTile icon="star-four-points" label="Poder Total" value={formatCompact(power.total)} color="#FFD166" />
+        <StatTile icon="cash-multiple" label="Investido" value={formatCurrency(summary.totalAmount)} color="#72E6C7" />
+        <StatTile icon="package-variant-closed" label="Itens" value={String(state.inventory.length)} color="#5AC8FA" />
+        <StatTile icon="dice-multiple" label="Drop" value={formatMultiplier(multipliers.itemDropMultiplier)} color="#FF8A9A" />
       </View>
-      <View style={styles.listContent}>
-        <Text style={styles.listTitle}>{mission.title}</Text>
-        <Text style={styles.listText}>{mission.description}</Text>
-        <ProgressBar value={mission.progress} color={mission.completed ? '#62D6A6' : '#F6C453'} />
-        <Text style={styles.listMeta}>
-          {formatCompact(mission.value)} de {formatCompact(mission.target)} · {mission.reward}
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Build ativa" title="Equipamentos em uso" />
+        {equippedItems.length ? (
+          <View style={styles.itemMiniGrid}>
+            {equippedItems.slice(0, 4).map((item) => {
+              const rarity = getRarityMeta(item.rarity);
+              return (
+                <View key={item.id} style={[styles.itemMini, { borderColor: `${rarity.color}88` }]}>
+                  <MaterialCommunityIcons name={item.icon} size={22} color={rarity.color} />
+                  <Text style={styles.itemMiniName} numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>Nenhum item equipado. O primeiro aporte já pode gerar uma peça inicial.</Text>
+        )}
+        {activeSets.length ? (
+          <View style={styles.setList}>
+            {activeSets.map((bonus) => (
+              <Text key={`${bonus.setName}-${bonus.pieces}`} style={styles.setLine}>
+                {bonus.setName}: {bonus.label}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Última validação" title={latest ? latest.typeTitle : 'Nenhum registro ainda'} />
+        {latest ? (
+          <View style={styles.latestBox}>
+            <View>
+              <Text style={styles.latestValue}>{formatCurrency(latest.amount)}</Text>
+              <Text style={styles.latestMeta}>
+                +{latest.xpGranted} XP · {getCategoryLabel(latest.category)}
+              </Text>
+            </View>
+            <RarityPill rarity={latest.droppedItems?.[0]?.rarity || 'comum'} />
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>A aba Validar cria registros automáticos com XP, poder e chance de drop.</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function MissionCard({ entry }) {
+  return (
+    <View style={styles.missionCard}>
+      <View style={[styles.missionIcon, entry.completed && styles.missionIconDone]}>
+        <MaterialCommunityIcons name={entry.completed ? 'check-bold' : 'progress-clock'} size={18} color={entry.completed ? '#07111F' : '#FFD166'} />
+      </View>
+      <View style={styles.missionBody}>
+        <View style={styles.missionTitleRow}>
+          <Text style={styles.missionTitle}>{entry.title}</Text>
+          <Text style={styles.missionCount}>
+            {formatCompact(entry.value)} / {formatCompact(entry.target)}
+          </Text>
+        </View>
+        <Text style={styles.missionText}>{entry.description}</Text>
+        {entry.reward ? <Text style={styles.rewardText}>{entry.reward}</Text> : null}
+        <ProgressBar value={entry.progress} color={entry.completed ? '#72E6C7' : '#FFD166'} />
+      </View>
+    </View>
+  );
+}
+
+function MissionsView({ quests, achievements }) {
+  return (
+    <View style={styles.screenStack}>
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Livro de missões" title="Missões da guilda" />
+        <View style={styles.listStack}>
+          {quests.map((quest) => (
+            <MissionCard key={quest.id} entry={quest} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Conquistas" title="Troféus de progresso" />
+        <View style={styles.listStack}>
+          {achievements.map((achievement) => (
+            <MissionCard key={achievement.id} entry={achievement} />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function DropPreview({ amount, multiplier }) {
+  const chances = calculateDropChances(amount, multiplier);
+
+  return (
+    <View style={styles.dropPreview}>
+      {chances.map((entry) => {
+        const meta = getRarityMeta(entry.rarity);
+        return (
+          <View key={entry.rarity} style={styles.dropRow}>
+            <View style={styles.dropName}>
+              <View style={[styles.dropDot, { backgroundColor: meta.color }]} />
+              <Text style={styles.dropLabel}>{meta.label}</Text>
+            </View>
+            <View style={styles.dropTrack}>
+              <View style={[styles.dropFill, { width: `${Math.max(4, Math.round(entry.chance * 100))}%`, backgroundColor: meta.color }]} />
+            </View>
+            <Text style={styles.dropChance}>{formatPercent(entry.chance)}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function ValidationView({
+  amountInput,
+  setAmountInput,
+  currency,
+  setCurrency,
+  selectedCategory,
+  setSelectedCategory,
+  selectedType,
+  setSelectedType,
+  ocrText,
+  setOcrText,
+  ocrResult,
+  setOcrResult,
+  notice,
+  multipliers,
+  onAnalyzeOcr,
+  onValidate,
+}) {
+  const parsedAmount = parseCurrencyInput(amountInput);
+  const types = useMemo(() => getInvestmentTypesByCategory(selectedCategory), [selectedCategory]);
+  const selectedConfig = getTypeConfig(selectedType);
+
+  useEffect(() => {
+    if (!types.some((entry) => entry.key === selectedType) && types[0]) {
+      setSelectedType(types[0].key);
+    }
+  }, [selectedType, setSelectedType, types]);
+
+  return (
+    <View style={styles.screenStack}>
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Entrada guiada" title="Validação automática" />
+        <Text style={styles.helperText}>
+          Digite a quantia, escolha a categoria e confirme. O comprovante pode ser analisado por OCR assistido quando houver texto disponível.
+        </Text>
+
+        <Text style={styles.inputLabel}>Quantia investida</Text>
+        <View style={styles.amountRow}>
+          <TextInput
+            value={amountInput}
+            onChangeText={setAmountInput}
+            placeholder="0,00"
+            placeholderTextColor="#8FA6BA"
+            keyboardType="decimal-pad"
+            style={[styles.input, styles.amountInput]}
+          />
+          <View style={styles.currencyGroup}>
+            {['BRL', 'USD'].map((entry) => (
+              <ChoiceChip key={entry} label={entry} compact selected={currency === entry} onPress={() => setCurrency(entry)} />
+            ))}
+          </View>
+        </View>
+
+        <Text style={styles.inputLabel}>Categoria</Text>
+        <View style={styles.chipGrid}>
+          {INVESTMENT_CATEGORIES.map((category) => (
+            <ChoiceChip
+              key={category.key}
+              label={category.label}
+              icon={category.icon}
+              selected={selectedCategory === category.key}
+              onPress={() => setSelectedCategory(category.key)}
+            />
+          ))}
+        </View>
+
+        <Text style={styles.inputLabel}>Opção pré-definida</Text>
+        <View style={styles.typeList}>
+          {types.map((type) => (
+            <Pressable
+              key={type.key}
+              onPress={() => setSelectedType(type.key)}
+              style={[styles.typeOption, selectedType === type.key && styles.typeOptionActive]}
+            >
+              <View style={styles.typeLeft}>
+                <MaterialCommunityIcons name={type.icon} size={21} color={selectedType === type.key ? '#07111F' : '#72E6C7'} />
+                <View style={styles.typeTextWrap}>
+                  <Text style={[styles.typeTitle, selectedType === type.key && styles.typeTitleActive]}>{type.title}</Text>
+                  <Text style={[styles.typeLearning, selectedType === type.key && styles.typeLearningActive]} numberOfLines={2}>
+                    {type.learning}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.typeXp, selectedType === type.key && styles.typeXpActive]}>+{type.baseXp} XP</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Validador OCR" title="Leitura assistida" right={<GhostButton compact icon="file-search" onPress={() => setOcrText(OCR_SAMPLE)}>Exemplo</GhostButton>} />
+        <TextInput
+          value={ocrText}
+          onChangeText={setOcrText}
+          placeholder="Cole aqui o texto extraído do comprovante, nota de corretagem ou PDF."
+          placeholderTextColor="#8FA6BA"
+          multiline
+          style={[styles.input, styles.ocrInput]}
+        />
+        <View style={styles.buttonRow}>
+          <GhostButton icon="eraser" onPress={() => {
+            setOcrText('');
+            setOcrResult(null);
+          }}>
+            Limpar OCR
+          </GhostButton>
+          <PrimaryButton icon="text-recognition" compact onPress={onAnalyzeOcr}>
+            Analisar
+          </PrimaryButton>
+        </View>
+        {ocrResult ? (
+          <View style={styles.ocrResult}>
+            <MaterialCommunityIcons name={ocrResult.confidence >= 0.7 ? 'check-decagram' : 'alert-circle'} size={20} color={ocrResult.confidence >= 0.7 ? '#72E6C7' : '#FFD166'} />
+            <View style={styles.ocrResultText}>
+              <Text style={styles.ocrSummary}>{ocrResult.summary}</Text>
+              <Text style={styles.ocrMeta}>
+                Confiança {formatPercent(ocrResult.confidence)} · {getTypeConfig(ocrResult.typeKey).title}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Recompensas" title="Prévia do drop" />
+        <View style={styles.rewardPreview}>
+          <View>
+            <Text style={styles.rewardMain}>{selectedConfig.title}</Text>
+            <Text style={styles.rewardSub}>
+              {formatCurrency(parsedAmount, currency)} · XP {formatMultiplier(multipliers.xpMultiplier)} · Drop {formatMultiplier(multipliers.itemDropMultiplier)}
+            </Text>
+          </View>
+          <MaterialCommunityIcons name={selectedConfig.icon} size={30} color="#FFD166" />
+        </View>
+        <DropPreview amount={currency === 'USD' ? parsedAmount * USD_BRL_RATE : parsedAmount} multiplier={multipliers.itemDropMultiplier} />
+        {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
+        <PrimaryButton icon="creation" tone="amber" onPress={onValidate}>
+          Validar registro
+        </PrimaryButton>
+      </View>
+    </View>
+  );
+}
+
+function EquipmentSlot({ slot, item }) {
+  const rarity = item ? getRarityMeta(item.rarity) : null;
+
+  return (
+    <View style={[styles.equipmentSlot, item && { borderColor: `${rarity.color}88`, backgroundColor: `${rarity.aura}18` }]}>
+      <View style={styles.slotIcon}>
+        <MaterialCommunityIcons name={item?.icon || 'rhombus-outline'} size={22} color={item ? rarity.color : '#7E93A7'} />
+      </View>
+      <View style={styles.slotTextWrap}>
+        <Text style={styles.slotLabel}>{slot.label}</Text>
+        <Text style={styles.slotItem} numberOfLines={1}>
+          {item?.name || 'Vazio'}
         </Text>
       </View>
     </View>
   );
 }
 
-function ItemCard({ item, equipped, owned, onEquip }) {
+function ItemCard({ item, equipped, onEquip }) {
   const rarity = getRarityMeta(item.rarity);
+
   return (
-    <Pressable onPress={owned ? () => onEquip(item) : undefined} style={[styles.itemCard, owned && styles.itemOwned, equipped && styles.itemEquipped]}>
-      <View style={[styles.itemGlyph, { borderColor: rarity.color }]}>
-        <MaterialCommunityIcons name={equipped ? 'star-check' : owned ? 'star-four-points' : 'lock-outline'} size={24} color={rarity.color} />
-      </View>
-      <View style={styles.itemContent}>
-        <View style={styles.itemTitleRow}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={[styles.rarity, { color: rarity.color }]}>{rarity.label}</Text>
+    <View style={[styles.itemCard, { borderColor: `${rarity.color}77` }]}>
+      <View style={styles.itemCardTop}>
+        <View style={[styles.itemIcon, { backgroundColor: `${rarity.aura}22` }]}>
+          <MaterialCommunityIcons name={item.icon} size={25} color={rarity.color} />
         </View>
-        <Text style={styles.itemText}>{item.flavor}</Text>
-        <Text style={styles.itemMeta}>{item.setName} · {item.bonusLabel}</Text>
+        <View style={styles.itemInfo}>
+          <Text style={styles.itemName}>{item.name}</Text>
+          <Text style={styles.itemFlavor}>{item.flavor}</Text>
+        </View>
       </View>
-    </Pressable>
+      <View style={styles.itemMetaRow}>
+        <RarityPill rarity={item.rarity} />
+        <Text style={styles.itemPower}>Poder {item.power}</Text>
+        <Text style={styles.itemPower}>{item.bonusLabel}</Text>
+      </View>
+      <Text style={styles.itemLore}>{item.lore}</Text>
+      <PrimaryButton icon={equipped ? 'shield-check' : 'shield-plus'} compact disabled={equipped} onPress={() => onEquip(item.id)}>
+        {equipped ? 'Equipado' : 'Equipar'}
+      </PrimaryButton>
+    </View>
+  );
+}
+
+function InventoryView({ state, multipliers, onEquip }) {
+  const ownedItems = getOwnedItems(state.inventory).sort((a, b) => (RARITY_ORDER[b.rarity] || 0) - (RARITY_ORDER[a.rarity] || 0) || b.power - a.power);
+  const equippedIds = new Set(Object.values(state.equipment).filter(Boolean));
+  const activeSets = getActiveSetBonuses(state.equipment);
+
+  return (
+    <View style={styles.screenStack}>
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Arsenal" title="Inventário e equipamentos" />
+        <View style={styles.buildStats}>
+          <StatTile icon="star-four-points" label="XP" value={formatMultiplier(multipliers.xpMultiplier)} color="#FFD166" />
+          <StatTile icon="dice-multiple" label="Drops" value={formatMultiplier(multipliers.itemDropMultiplier)} color="#FF8A9A" />
+        </View>
+        <View style={styles.equipmentGrid}>
+          {SLOT_ORDER.map((slot) => (
+            <EquipmentSlot key={slot.key} slot={slot} item={ITEM_MAP[state.equipment[slot.key]]} />
+          ))}
+        </View>
+        {activeSets.length ? (
+          <View style={styles.setList}>
+            {activeSets.map((bonus) => (
+              <Text key={`${bonus.setName}-${bonus.pieces}`} style={styles.setLine}>
+                {bonus.setName}: {bonus.label}
+              </Text>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>Equipe itens do mesmo conjunto para ativar bônus de set.</Text>
+        )}
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Drops coletados" title={`${ownedItems.length} item(ns)`} />
+        {ownedItems.length ? (
+          <View style={styles.inventoryList}>
+            {ownedItems.map((item) => (
+              <ItemCard key={item.id} item={item} equipped={equippedIds.has(item.id)} onEquip={onEquip} />
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>Valide um aporte para receber o primeiro item. A raridade depende do valor investido e da sua build.</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function ProfileView({ state, summary, power, levelState, onExportCsv }) {
+  const race = CHARACTER_RACES.find((entry) => entry.key === state.player.race) || CHARACTER_RACES[0];
+  const characterClass = CHARACTER_CLASSES.find((entry) => entry.key === state.player.classKey) || CHARACTER_CLASSES[0];
+  const recentHistory = state.history.slice(0, 5);
+
+  return (
+    <View style={styles.screenStack}>
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Ficha" title="Ficha do aventureiro" />
+        <View style={styles.profileHeader}>
+          <View style={styles.profileAvatar}>
+            <MaterialCommunityIcons name="account-circle" size={50} color="#72E6C7" />
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{state.player.name}</Text>
+            <Text style={styles.profileLine}>{race.label}</Text>
+            <Text style={styles.profileLine}>{characterClass.label}</Text>
+          </View>
+        </View>
+        <View style={styles.statsGrid}>
+          <StatTile icon="star" label="Nível" value={String(levelState.level)} color="#FFD166" />
+          <StatTile icon="chart-areaspline" label="XP" value={formatCompact(levelState.totalXp)} color="#72E6C7" />
+          <StatTile icon="arm-flex" label="Poder" value={formatCompact(power.total)} color="#5AC8FA" />
+          <StatTile icon="cash" label="Aportes" value={String(summary.count)} color="#FF8A9A" />
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Relatório" title="Histórico validado" right={<GhostButton compact icon="file-delimited" onPress={onExportCsv}>CSV</GhostButton>} />
+        {recentHistory.length ? (
+          <View style={styles.historyList}>
+            {recentHistory.map((entry) => (
+              <View key={entry.id} style={styles.historyRow}>
+                <View style={styles.historyIcon}>
+                  <MaterialCommunityIcons name={getTypeConfig(entry.typeKey).icon} size={20} color="#72E6C7" />
+                </View>
+                <View style={styles.historyText}>
+                  <Text style={styles.historyTitle}>{entry.typeTitle}</Text>
+                  <Text style={styles.historyMeta}>
+                    {formatCurrency(entry.amount)} · +{entry.xpGranted} XP · {entry.hash}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>Sem histórico por enquanto.</Text>
+        )}
+      </View>
+    </View>
   );
 }
 
 export default function MobileApp() {
-  const dimensions = useWindowDimensions();
+  const { width } = useWindowDimensions();
+  const scrollRef = useRef(null);
   const [state, setState] = useState(loadState);
   const [tab, setTab] = useState('inicio');
-  const [receipt, setReceipt] = useState(SAMPLE_RECEIPT);
+  const [amountInput, setAmountInput] = useState('1.250,00');
+  const [currency, setCurrency] = useState('BRL');
+  const [selectedCategory, setSelectedCategory] = useState(INVESTMENT_CATEGORIES[0].key);
+  const [selectedType, setSelectedType] = useState(getInvestmentTypesByCategory(INVESTMENT_CATEGORIES[0].key)[0]?.key || 'tesouro-selic');
+  const [ocrText, setOcrText] = useState('');
+  const [ocrResult, setOcrResult] = useState(null);
   const [notice, setNotice] = useState('');
-  const shellWidth = Math.min(dimensions.width, 540);
+  const [magicEvent, setMagicEvent] = useState(null);
 
   const summary = useMemo(() => getHistorySummary(state.history), [state.history]);
   const power = useMemo(() => calculateProfilePower(state.equipment, state.history), [state.equipment, state.history]);
-  const level = useMemo(() => getLevelState(summary.totalXp), [summary.totalXp]);
+  const levelState = useMemo(() => getLevelState(summary.totalXp), [summary.totalXp]);
+  const multipliers = useMemo(() => getEquipmentMultipliers(state.equipment), [state.equipment]);
   const quests = useMemo(
-    () =>
-      getQuestStatuses({
-        history: state.history,
-        summary,
-        power,
-        equipment: state.equipment,
-        exportCount: state.meta.exportCount,
-      }),
-    [state.history, summary, power, state.equipment, state.meta.exportCount],
+    () => getQuestStatuses({ history: state.history, summary, power, equipment: state.equipment, inventory: state.inventory, exportCount: state.meta.exportCount }),
+    [power, state.equipment, state.history, state.inventory, state.meta.exportCount, summary],
   );
   const achievements = useMemo(
-    () =>
-      getAchievementStatuses({
-        history: state.history,
-        summary,
-        power,
-        equipment: state.equipment,
-        exportCount: state.meta.exportCount,
-      }),
-    [state.history, summary, power, state.equipment, state.meta.exportCount],
+    () => getAchievementStatuses({ history: state.history, summary, power, equipment: state.equipment, inventory: state.inventory, exportCount: state.meta.exportCount }),
+    [power, state.equipment, state.history, state.inventory, state.meta.exportCount, summary],
   );
-  const ownedItems = useMemo(() => getOwnedItems(state.inventory), [state.inventory]);
-  const activeBonuses = useMemo(() => getActiveSetBonuses(state.equipment), [state.equipment]);
-  const advisorLine = useMemo(() => getAdvisorLine({ history: state.history, summary, equipment: state.equipment }), [state.history, summary, state.equipment]);
+
+  useEffect(() => {
+    if (!magicEvent) {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => setMagicEvent(null), 2300);
+    return () => clearTimeout(timeout);
+  }, [magicEvent]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+  }, [tab]);
 
   function commitState(nextState) {
-    const withDate = {
+    const withUpdate = {
       ...nextState,
       meta: {
         ...nextState.meta,
         updatedAt: new Date().toISOString(),
       },
     };
-    setState(withDate);
-    persistState(withDate);
+    setState(withUpdate);
+    persistState(withUpdate);
+  }
+
+  function showMagic(event) {
+    setMagicEvent({ id: `${Date.now()}-${event.title}`, ...event });
   }
 
   function handleCreate(player) {
-    const nextState = createInitialGameState({
-      ...state,
-      player,
-      meta: {
-        ...state.meta,
-        characterCreated: true,
-        createdAt: new Date().toISOString(),
-      },
-    });
-    commitState(nextState);
+    const now = new Date().toISOString();
+    commitState(
+      createInitialGameState({
+        ...state,
+        meta: {
+          ...state.meta,
+          characterCreated: true,
+          createdAt: state.meta.createdAt || now,
+          updatedAt: now,
+        },
+        player: {
+          ...state.player,
+          ...player,
+        },
+      }),
+    );
+  }
+
+  function handleAnalyzeOcr() {
+    const result = analyzeOcrText(ocrText);
+    setOcrResult(result);
+    setCurrency(result.currency);
+    setSelectedCategory(result.category);
+    setSelectedType(result.typeKey);
+
+    if (result.amount > 0 && parseCurrencyInput(amountInput) === 0) {
+      setAmountInput(String(result.amount).replace('.', ','));
+    }
+
+    setNotice(result.summary);
   }
 
   function handleValidate() {
     const analysis = analyzeInvestmentPayload({
-      transcript: receipt,
+      transcript: ocrText,
+      manualAmount: amountInput,
+      typeKey: selectedType,
+      currency,
       equipment: state.equipment,
-      exchangeRates: { usdBrl: 5.1 },
+      exchangeRates: { usdBrl: USD_BRL_RATE },
+      now: new Date(),
     });
-    const reward = getNextItemReward(analysis.typeKey, state.inventory);
+
+    if (!analysis.amount || analysis.amount <= 0) {
+      setNotice('Informe uma quantia válida antes de validar o registro.');
+      return;
+    }
+
+    const beforeLevel = getLevelState(summary.totalXp).level;
+    const hash = shortHash(`${state.player.name}-${analysis.typeKey}-${analysis.amount}-${analysis.createdAt}-${ocrText}`);
+    const roll = rollItemDrops({
+      typeKey: analysis.typeKey,
+      amount: analysis.amount,
+      inventory: state.inventory,
+      equipment: state.equipment,
+      seed: hash,
+    });
+    const droppedItems = roll.drops.map((item) => ({
+      id: item.id,
+      name: item.name,
+      rarity: item.rarity,
+      power: item.power,
+    }));
     const record = {
-      id: `registro-${Date.now()}`,
-      proofName: 'registro-manual.txt',
-      hash: shortHash(`${receipt}-${Date.now()}`),
+      id: `registro-${hash}`,
+      proofName: ocrText ? 'ocr-assistido.txt' : 'entrada-guiada',
+      hash,
       ...analysis,
+      droppedItems,
+      dropChances: roll.chances,
     };
-    const inventory = reward ? [...state.inventory, reward.id] : state.inventory;
-    const withReward = reward
-      ? equipFirstCompatibleItem({ ...state, inventory }, reward.id)
-      : { ...state, inventory };
-
-    commitState({
-      ...withReward,
+    const inventory = [...new Set([...state.inventory, ...roll.drops.map((item) => item.id)])];
+    let nextState = {
+      ...state,
       history: [record, ...state.history],
+      inventory,
       wallet: {
-        ...state.wallet,
-        coins: state.wallet.coins + Math.round(analysis.xpGranted / 4),
-        credits: state.wallet.credits + (reward ? 1 : 0),
+        coins: Number(state.wallet.coins || 0) + Math.max(10, Math.round(analysis.xpGranted / 8)),
+        crystals: Number(state.wallet.crystals || 0) + roll.drops.filter((item) => item.rarity === 'lendario' || item.rarity === 'artefato').length,
       },
+      meta: {
+        ...state.meta,
+        duplicateDrops: Number(state.meta.duplicateDrops || 0) + roll.duplicateCount,
+      },
+    };
+
+    nextState = autoEquipBestDrops(nextState, roll.drops);
+    commitState(nextState);
+
+    const afterLevel = getLevelState(getHistorySummary(nextState.history).totalXp).level;
+    const bestDrop = getBestDrop(roll.drops);
+    const subtitle = bestDrop
+      ? `${bestDrop.name} entrou no inventário.`
+      : roll.duplicateCount
+        ? 'Drop repetido virou progresso de coleção.'
+        : `+${analysis.xpGranted} XP adicionados.`;
+
+    showMagic({
+      type: afterLevel > beforeLevel ? 'level' : 'drop',
+      rarity: bestDrop?.rarity || 'raro',
+      title: afterLevel > beforeLevel ? `Nível ${afterLevel}!` : bestDrop ? 'Drop arcano!' : 'Registro validado',
+      subtitle,
     });
-    setNotice(
-      reward
-        ? `Registro validado: ${analysis.typeTitle}. Novo marco desbloqueado: ${reward.name}.`
-        : `Registro validado: ${analysis.typeTitle}. A trilha recebeu XP e pontuação.`,
-    );
+
+    setNotice(`Registro validado: ${analysis.typeTitle}, ${formatCurrency(analysis.amount)}, +${analysis.xpGranted} XP.`);
+    setOcrResult(null);
   }
 
-  function handleEquip(item) {
-    commitState(equipFirstCompatibleItem(state, item.id));
-    setNotice(`${item.name} equipado no perfil.`);
+  function handleEquip(itemId) {
+    const item = ITEM_MAP[itemId];
+    commitState(equipItem(state, itemId));
+    showMagic({
+      type: 'equip',
+      rarity: item?.rarity || 'comum',
+      title: 'Item equipado',
+      subtitle: item ? `${item.name} ajustou seus multiplicadores.` : 'A build foi atualizada.',
+    });
   }
 
-  function handleExport() {
+  function handleExportCsv() {
     const csv = buildCsv(state.history);
     commitState({
       ...state,
       meta: {
         ...state.meta,
-        exportCount: state.meta.exportCount + 1,
+        exportCount: Number(state.meta.exportCount || 0) + 1,
+        lastCsvPreview: csv.slice(0, 240),
       },
     });
-    setNotice(`Relatório preparado com ${csv.split('\n').length - 1} registro(s).`);
-  }
-
-  function resetJourney() {
-    const nextState = createInitialGameState();
-    setState(nextState);
-    persistState(nextState);
-    setTab('inicio');
-    setNotice('');
+    setNotice(`CSV preparado com ${state.history.length} registro(s).`);
   }
 
   if (!state.meta.characterCreated) {
     return <CreationScreen onCreate={handleCreate} />;
   }
 
-  const latest = state.history[0];
-
-  function renderHome() {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SectionHeader
-          eyebrow="Painel educacional"
-          title={`Olá, ${state.player.name}`}
-          right={<Chip tone="amber">Nível {level.level}</Chip>}
-        />
-
-        <View style={styles.statGrid}>
-          <StatCard icon="chart-timeline-variant" label="Pontuação Total" value={formatCompact(power.total)} color="#2DD4BF" />
-          <StatCard icon="cash-multiple" label="Valor registrado" value={formatCurrency(summary.totalAmount)} color="#F6C453" />
-          <StatCard icon="school-outline" label="XP acumulado" value={formatCompact(summary.totalXp)} color="#5AC8FA" />
-          <StatCard icon="shape-outline" label="Categorias" value={summary.categoryCount} color="#FF7A6B" />
-        </View>
-
-        <View style={styles.panel}>
-          <SectionHeader eyebrow="Orientação" title="Próximo passo" />
-          <Text style={styles.panelText}>{advisorLine}</Text>
-          <ProgressBar value={level.progress} />
-          <Text style={styles.panelMeta}>Progresso até o próximo nível</Text>
-        </View>
-
-        {latest ? (
-          <View style={styles.panel}>
-            <SectionHeader eyebrow="Último registro" title={latest.typeTitle} />
-            <Text style={styles.panelText}>{latest.learning}</Text>
-            <View style={styles.rowWrap}>
-              <Chip>{formatCurrency(latest.amount)}</Chip>
-              <Chip tone="amber">+{latest.xpGranted} XP</Chip>
-              <Chip tone="coral">+{latest.powerGranted} pts</Chip>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.panel}>
-            <SectionHeader eyebrow="Começo rápido" title="Valide um comprovante" />
-            <Text style={styles.panelText}>
-              Use a aba Validar para registrar um investimento. O app classifica o tipo, calcula XP e libera marcos educacionais.
-            </Text>
-            <PrimaryButton icon="text-box-check-outline" onPress={() => setTab('validacao')}>
-              Abrir validação
-            </PrimaryButton>
-          </View>
-        )}
-      </ScrollView>
+  const content =
+    tab === 'missoes' ? (
+      <MissionsView quests={quests} achievements={achievements} />
+    ) : tab === 'validacao' ? (
+      <ValidationView
+        amountInput={amountInput}
+        setAmountInput={setAmountInput}
+        currency={currency}
+        setCurrency={setCurrency}
+        selectedCategory={selectedCategory}
+        setSelectedCategory={setSelectedCategory}
+        selectedType={selectedType}
+        setSelectedType={setSelectedType}
+        ocrText={ocrText}
+        setOcrText={setOcrText}
+        ocrResult={ocrResult}
+        setOcrResult={setOcrResult}
+        notice={notice}
+        multipliers={multipliers}
+        onAnalyzeOcr={handleAnalyzeOcr}
+        onValidate={handleValidate}
+      />
+    ) : tab === 'inventario' ? (
+      <InventoryView state={state} multipliers={multipliers} onEquip={handleEquip} />
+    ) : tab === 'perfil' ? (
+      <ProfileView state={state} summary={summary} power={power} levelState={levelState} onExportCsv={handleExportCsv} />
+    ) : (
+      <HomeView state={state} summary={summary} power={power} levelState={levelState} multipliers={multipliers} setTab={setTab} />
     );
-  }
-
-  function renderMissions() {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SectionHeader eyebrow="Metas guiadas" title="Missões da jornada" />
-        {quests.map((quest) => (
-          <MissionRow key={quest.id} mission={quest} />
-        ))}
-
-        <SectionHeader eyebrow="Reconhecimento" title="Conquistas" />
-        {achievements.map((achievement) => (
-          <MissionRow key={achievement.id} mission={achievement} />
-        ))}
-      </ScrollView>
-    );
-  }
-
-  function renderValidation() {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SectionHeader eyebrow="Leitura assistida" title="Validação financeira" />
-        <Text style={styles.helperText}>
-          Cole um texto de comprovante ou registre manualmente. O Finance Quest identifica categoria, valor, XP e pontuação.
-        </Text>
-        <TextInput
-          value={receipt}
-          onChangeText={setReceipt}
-          multiline
-          placeholder="Cole aqui o texto do comprovante"
-          placeholderTextColor="#8FA6BA"
-          style={styles.textArea}
-        />
-        <PrimaryButton icon="check-decagram-outline" onPress={handleValidate} disabled={!receipt.trim()}>
-          Validar registro
-        </PrimaryButton>
-        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-
-        <View style={styles.panel}>
-          <SectionHeader eyebrow="Exemplo" title="Como o texto é interpretado" />
-          <Text style={styles.panelText}>
-            Palavras como Tesouro Selic, CDB, FII, ETF, IPCA ou IVVB11 ajudam a classificar o investimento. Valores em dólar são convertidos para BRL na análise.
-          </Text>
-        </View>
-      </ScrollView>
-    );
-  }
-
-  function renderItems() {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SectionHeader eyebrow="Evolução visual" title="Biblioteca de Marcos" />
-        <Text style={styles.helperText}>
-          Marcos desbloqueados podem ser equipados para mostrar o foco do perfil e ativar bônus de trilha.
-        </Text>
-        {ITEM_LIBRARY.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            owned={state.inventory.includes(item.id)}
-            equipped={Object.values(state.equipment).includes(item.id)}
-            onEquip={handleEquip}
-          />
-        ))}
-      </ScrollView>
-    );
-  }
-
-  function renderProfile() {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SectionHeader eyebrow="Síntese" title="Maestria do portfólio" />
-        <View style={styles.profileHero}>
-          <Image source={APP_ICON} style={styles.profileIcon} />
-          <View style={styles.profileText}>
-            <Text style={styles.profileName}>{state.player.name}</Text>
-            <Text style={styles.profileMeta}>
-              {CHARACTER_RACES.find((entry) => entry.key === state.player.race)?.label} · {CHARACTER_CLASSES.find((entry) => entry.key === state.player.classKey)?.label}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.statGrid}>
-          <StatCard icon="star-four-points-outline" label="Marcos" value={ownedItems.length} color="#F6C453" />
-          <StatCard icon="vector-combine" label="Trilhas ativas" value={activeBonuses.length} color="#62D6A6" />
-          <StatCard icon="file-chart-outline" label="Registros" value={state.history.length} color="#5AC8FA" />
-          <StatCard icon="database-export-outline" label="Relatórios" value={state.meta.exportCount} color="#FF7A6B" />
-        </View>
-
-        <View style={styles.panel}>
-          <SectionHeader eyebrow="Equipamento educacional" title="Marcos equipados" />
-          {SLOT_ORDER.map((slot) => {
-            const item = ITEM_LIBRARY.find((entry) => entry.id === state.equipment[slot.key]);
-            return (
-              <View key={slot.key} style={styles.slotRow}>
-                <Text style={styles.slotLabel}>{slot.label}</Text>
-                <Text style={styles.slotValue}>{item ? item.name : 'Vazio'}</Text>
-              </View>
-            );
-          })}
-        </View>
-
-        <View style={styles.panel}>
-          <SectionHeader eyebrow="Relatório" title="Histórico financeiro" />
-          {state.history.slice(0, 4).map((entry) => (
-            <View key={entry.id} style={styles.historyRow}>
-              <View>
-                <Text style={styles.historyTitle}>{entry.typeTitle}</Text>
-                <Text style={styles.historyMeta}>{entry.category} · {entry.hash}</Text>
-              </View>
-              <Text style={styles.historyValue}>{formatCurrency(entry.amount)}</Text>
-            </View>
-          ))}
-          {!state.history.length ? <Text style={styles.panelText}>Nenhum registro validado ainda.</Text> : null}
-          <PrimaryButton icon="file-delimited-outline" onPress={handleExport} tone="amber">
-            Preparar relatório
-          </PrimaryButton>
-        </View>
-
-        <Pressable onPress={resetJourney} style={styles.resetButton}>
-          <Text style={styles.resetText}>Reiniciar jornada local</Text>
-        </Pressable>
-      </ScrollView>
-    );
-  }
-
-  const currentTab = TABS.find((entry) => entry.key === tab) || TABS[0];
 
   return (
-    <LinearGradient colors={['#07111F', '#0B1726', '#102033']} style={styles.app}>
+    <LinearGradient colors={['#07111F', '#0E1B2E', '#122E3A']} style={styles.appRoot}>
       <StatusBar barStyle="light-content" />
-      <View style={[styles.shell, { width: shellWidth }]}>
-        <View style={styles.topBar}>
-          <View>
-            <Text style={styles.topEyebrow}>{APP_NAME}</Text>
-            <Text style={styles.topTitle}>{currentTab.label}</Text>
-          </View>
-          <View style={styles.scorePill}>
-            <MaterialCommunityIcons name="chart-donut" size={16} color="#07111F" />
-            <Text style={styles.scoreText}>{formatCompact(power.total)}</Text>
-          </View>
-        </View>
-
-        {tab === 'inicio'
-          ? renderHome()
-          : tab === 'missoes'
-            ? renderMissions()
-            : tab === 'validacao'
-              ? renderValidation()
-              : tab === 'marcos'
-                ? renderItems()
-                : renderProfile()}
-
-        <View style={styles.nav}>
+      <View style={[styles.mobileShell, width >= 520 && styles.mobileShellWide]}>
+        <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {content}
+        </ScrollView>
+        <View style={styles.bottomNav}>
           {TABS.map((entry) => (
             <TabButton key={entry.key} tab={entry} active={tab === entry.key} onPress={() => setTab(entry.key)} />
           ))}
         </View>
       </View>
+      <MagicBurst event={magicEvent} />
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  app: {
+  appRoot: {
     flex: 1,
-    alignItems: 'center',
-    backgroundColor: '#07111F',
+    minHeight: '100%',
   },
-  shell: {
+  mobileShell: {
     flex: 1,
+    width: '100%',
     alignSelf: 'center',
-    backgroundColor: '#07111F',
+  },
+  mobileShellWide: {
+    maxWidth: 520,
+  },
+  scrollContent: {
+    paddingTop: 22,
+    paddingHorizontal: 16,
+    paddingBottom: 150,
+  },
+  screenStack: {
+    gap: 14,
   },
   creation: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 34,
+    minHeight: '100%',
+  },
+  creationContent: {
+    paddingHorizontal: 18,
+    paddingTop: 28,
+    paddingBottom: 42,
   },
   creationHero: {
     alignItems: 'center',
-    paddingVertical: 18,
+    gap: 12,
+    marginBottom: 18,
   },
-  logo: {
-    width: 88,
-    height: 88,
-    borderRadius: 24,
-    marginBottom: 14,
+  logoCrest: {
+    width: 92,
+    height: 92,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#D6FFF5',
+    gap: 2,
+  },
+  logoText: {
+    color: '#07111F',
+    fontSize: 16,
+    fontWeight: '900',
   },
   appName: {
-    color: '#F4F8FB',
+    color: '#F6FBFF',
     fontSize: 34,
     fontWeight: '900',
-    letterSpacing: 0,
     textAlign: 'center',
   },
   creationSubtitle: {
-    color: '#C7D7E5',
+    color: '#B9CBDA',
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
-    marginTop: 10,
-    maxWidth: 380,
+    maxWidth: 360,
   },
-  creationPanel: {
-    paddingBottom: 24,
-  },
-  inputLabel: {
-    color: '#F4F8FB',
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 8,
-    marginTop: 14,
-  },
-  input: {
-    minHeight: 52,
-    borderRadius: 8,
+  heroPanel: {
+    borderRadius: 20,
+    padding: 18,
     borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.24)',
-    backgroundColor: 'rgba(16,32,51,0.92)',
-    color: '#F4F8FB',
-    paddingHorizontal: 14,
-    fontSize: 16,
+    borderColor: '#2C5366',
+    overflow: 'hidden',
   },
-  optionGrid: {
-    gap: 10,
-  },
-  option: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(143,166,186,0.22)',
-    backgroundColor: 'rgba(11,23,38,0.72)',
-    padding: 12,
-  },
-  optionActive: {
-    borderColor: '#2DD4BF',
-    backgroundColor: 'rgba(45,212,191,0.12)',
-  },
-  optionTitle: {
-    color: '#F4F8FB',
-    fontWeight: '800',
-    fontSize: 14,
-  },
-  optionText: {
-    color: '#C7D7E5',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
-  },
-  topBar: {
-    minHeight: 86,
-    paddingTop: 22,
-    paddingHorizontal: 18,
-    paddingBottom: 12,
+  heroTop: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(125,211,252,0.14)',
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  topEyebrow: {
-    color: '#62D6A6',
+  eyebrowLight: {
+    color: '#9EECD8',
     fontSize: 12,
-    fontWeight: '900',
     textTransform: 'uppercase',
-    letterSpacing: 0,
+    fontWeight: '800',
   },
-  topTitle: {
-    color: '#F4F8FB',
-    fontSize: 25,
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 28,
     fontWeight: '900',
-    letterSpacing: 0,
     marginTop: 2,
   },
-  scorePill: {
-    minWidth: 74,
-    height: 34,
-    borderRadius: 17,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
+  heroCopy: {
+    color: '#D8E7F3',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 14,
+  },
+  levelBadge: {
+    width: 70,
+    minHeight: 70,
+    borderRadius: 18,
+    backgroundColor: '#FFD166',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#F6C453',
+    paddingVertical: 8,
   },
-  scoreText: {
+  levelLabel: {
+    color: '#3B2B02',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  levelNumber: {
     color: '#07111F',
+    fontSize: 28,
     fontWeight: '900',
   },
-  content: {
-    padding: 16,
-    paddingBottom: 112,
-    gap: 14,
+  xpRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  xpLabel: {
+    color: '#ECF7FF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  heroActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  panel: {
+    backgroundColor: 'rgba(12, 25, 42, 0.94)',
+    borderWidth: 1,
+    borderColor: '#243E53',
+    borderRadius: 18,
+    padding: 14,
+    gap: 12,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
   },
   sectionHeaderText: {
     flex: 1,
   },
   eyebrow: {
-    color: '#62D6A6',
+    color: '#72E6C7',
     fontSize: 11,
     fontWeight: '900',
     textTransform: 'uppercase',
-    letterSpacing: 0,
   },
   sectionTitle: {
-    color: '#F4F8FB',
-    fontSize: 22,
+    color: '#F6FBFF',
+    fontSize: 19,
     fontWeight: '900',
-    letterSpacing: 0,
+    marginTop: 2,
   },
-  statGrid: {
+  helperText: {
+    color: '#B9CBDA',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
-  statCard: {
-    width: '48.5%',
-    minHeight: 104,
-    borderRadius: 8,
+  statTile: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    minHeight: 84,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.16)',
-    backgroundColor: 'rgba(16,32,51,0.82)',
+    borderColor: '#243E53',
+    backgroundColor: '#0A1726',
     padding: 12,
     justifyContent: 'space-between',
   },
   statLabel: {
-    color: '#C7D7E5',
+    color: '#91A9BC',
     fontSize: 12,
     fontWeight: '700',
   },
   statValue: {
-    color: '#F4F8FB',
+    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: '900',
   },
-  panel: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.16)',
-    backgroundColor: 'rgba(11,23,38,0.76)',
-    padding: 14,
-    gap: 10,
-  },
-  panelText: {
-    color: '#C7D7E5',
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  panelMeta: {
-    color: '#8FA6BA',
-    fontSize: 12,
-  },
-  helperText: {
-    color: '#C7D7E5',
-    fontSize: 14,
-    lineHeight: 21,
-  },
   progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(143,166,186,0.18)',
+    height: 9,
+    backgroundColor: '#102236',
+    borderRadius: 99,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: 99,
   },
-  rowWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  inputLabel: {
+    color: '#D8E7F3',
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 4,
   },
-  chip: {
-    minHeight: 28,
+  input: {
+    minHeight: 48,
     borderRadius: 14,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'flex-start',
-  },
-  chipTeal: {
-    backgroundColor: 'rgba(45,212,191,0.16)',
-  },
-  chipAmber: {
-    backgroundColor: 'rgba(246,196,83,0.18)',
-  },
-  chipCoral: {
-    backgroundColor: 'rgba(255,122,107,0.18)',
-  },
-  chipText: {
-    color: '#F4F8FB',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  listCard: {
-    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.16)',
-    backgroundColor: 'rgba(16,32,51,0.82)',
-    padding: 12,
-    flexDirection: 'row',
-    gap: 12,
-  },
-  listIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F6C453',
-  },
-  listContent: {
-    flex: 1,
-    gap: 7,
-  },
-  listTitle: {
-    color: '#F4F8FB',
+    borderColor: '#2B4C62',
+    backgroundColor: '#071525',
+    color: '#F6FBFF',
+    paddingHorizontal: 13,
+    paddingVertical: 10,
     fontSize: 15,
-    fontWeight: '900',
   },
-  listText: {
-    color: '#C7D7E5',
-    fontSize: 13,
-    lineHeight: 18,
+  amountRow: {
+    gap: 10,
   },
-  listMeta: {
-    color: '#8FA6BA',
-    fontSize: 12,
-  },
-  textArea: {
-    minHeight: 160,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.24)',
-    backgroundColor: 'rgba(16,32,51,0.92)',
-    color: '#F4F8FB',
-    padding: 14,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlignVertical: 'top',
-  },
-  notice: {
-    color: '#07111F',
-    backgroundColor: '#62D6A6',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 18,
-  },
-  itemCard: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(143,166,186,0.14)',
-    backgroundColor: 'rgba(11,23,38,0.62)',
-    padding: 12,
-    flexDirection: 'row',
-    gap: 12,
-    opacity: 0.68,
-  },
-  itemOwned: {
-    opacity: 1,
-    borderColor: 'rgba(98,214,166,0.28)',
-  },
-  itemEquipped: {
-    backgroundColor: 'rgba(45,212,191,0.12)',
-  },
-  itemGlyph: {
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(7,17,31,0.72)',
-  },
-  itemContent: {
-    flex: 1,
-    gap: 5,
-  },
-  itemTitleRow: {
-    gap: 3,
-  },
-  itemName: {
-    color: '#F4F8FB',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  rarity: {
-    fontSize: 11,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  itemText: {
-    color: '#C7D7E5',
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  itemMeta: {
-    color: '#8FA6BA',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  profileHero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.16)',
-    backgroundColor: 'rgba(16,32,51,0.82)',
-    padding: 14,
-  },
-  profileIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 16,
-  },
-  profileText: {
-    flex: 1,
-  },
-  profileName: {
-    color: '#F4F8FB',
+  amountInput: {
     fontSize: 22,
     fontWeight: '900',
   },
-  profileMeta: {
-    color: '#C7D7E5',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  slotRow: {
-    minHeight: 38,
+  currencyGroup: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
+  },
+  optionStack: {
     gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(143,166,186,0.12)',
   },
-  slotLabel: {
-    color: '#8FA6BA',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  slotValue: {
-    flex: 1,
-    color: '#F4F8FB',
-    fontSize: 12,
-    textAlign: 'right',
-    fontWeight: '700',
-  },
-  historyRow: {
-    minHeight: 50,
+  optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(143,166,186,0.12)',
+    gap: 10,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 12,
   },
-  historyTitle: {
-    color: '#F4F8FB',
-    fontSize: 13,
+  optionRowActive: {
+    backgroundColor: '#72E6C7',
+    borderColor: '#B7FFF0',
+  },
+  optionTextWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  optionTitle: {
+    color: '#F6FBFF',
+    fontSize: 14,
     fontWeight: '900',
   },
-  historyMeta: {
-    color: '#8FA6BA',
-    fontSize: 11,
+  optionTitleActive: {
+    color: '#07111F',
   },
-  historyValue: {
-    color: '#F6C453',
-    fontSize: 13,
-    fontWeight: '900',
+  optionText: {
+    color: '#9EB4C5',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  optionTextActive: {
+    color: '#173047',
   },
   buttonWrap: {
-    borderRadius: 8,
+    borderRadius: 14,
     overflow: 'hidden',
+    flex: 1,
+  },
+  buttonCompact: {
+    flexGrow: 0,
+    minWidth: 132,
   },
   primaryButton: {
-    minHeight: 50,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
+    minHeight: 48,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
     gap: 8,
   },
   primaryButtonText: {
     color: '#07111F',
+    fontSize: 14,
     fontWeight: '900',
-    fontSize: 15,
   },
   disabled: {
-    opacity: 0.48,
+    opacity: 0.45,
   },
-  nav: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 10,
-    minHeight: 72,
-    borderRadius: 18,
+  ghostButton: {
+    minHeight: 46,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(125,211,252,0.18)',
-    backgroundColor: '#07111F',
+    borderColor: '#2B4C62',
+    backgroundColor: '#091827',
+    paddingHorizontal: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 7,
+  },
+  ghostButtonCompact: {
+    minHeight: 38,
+    paddingHorizontal: 10,
+  },
+  ghostButtonText: {
+    color: '#D8E7F3',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  choiceChip: {
+    minHeight: 42,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: '#2B4C62',
+    backgroundColor: '#091827',
+    paddingHorizontal: 11,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    flexGrow: 1,
+    flexBasis: '45%',
+  },
+  choiceChipCompact: {
+    minHeight: 40,
+    flexBasis: 0,
+  },
+  choiceChipActive: {
+    backgroundColor: '#72E6C7',
+    borderColor: '#B7FFF0',
+  },
+  choiceText: {
+    color: '#C9D8E5',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  choiceTextActive: {
+    color: '#07111F',
+  },
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  typeList: {
+    gap: 9,
+  },
+  typeOption: {
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 11,
+    gap: 8,
+  },
+  typeOptionActive: {
+    backgroundColor: '#72E6C7',
+    borderColor: '#B7FFF0',
+  },
+  typeLeft: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  typeTextWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  typeTitle: {
+    color: '#F6FBFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  typeTitleActive: {
+    color: '#07111F',
+  },
+  typeLearning: {
+    color: '#9EB4C5',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  typeLearningActive: {
+    color: '#173047',
+  },
+  typeXp: {
+    color: '#FFD166',
+    fontSize: 12,
+    fontWeight: '900',
+    alignSelf: 'flex-end',
+  },
+  typeXpActive: {
+    color: '#07111F',
+  },
+  ocrInput: {
+    minHeight: 104,
+    textAlignVertical: 'top',
+    lineHeight: 20,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  ocrResult: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 11,
+  },
+  ocrResultText: {
+    flex: 1,
+    gap: 3,
+  },
+  ocrSummary: {
+    color: '#F6FBFF',
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  ocrMeta: {
+    color: '#9EB4C5',
+    fontSize: 12,
+  },
+  rewardPreview: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 8,
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 12,
+  },
+  rewardMain: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  rewardSub: {
+    color: '#9EB4C5',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  dropPreview: {
+    gap: 8,
+  },
+  dropRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dropName: {
+    width: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
   },
-  tabButton: {
+  dropDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  dropLabel: {
+    color: '#D8E7F3',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  dropTrack: {
     flex: 1,
-    height: 54,
+    height: 8,
+    borderRadius: 99,
+    overflow: 'hidden',
+    backgroundColor: '#102236',
+  },
+  dropFill: {
+    height: '100%',
+    borderRadius: 99,
+  },
+  dropChance: {
+    width: 38,
+    color: '#F6FBFF',
+    fontSize: 12,
+    textAlign: 'right',
+    fontWeight: '900',
+  },
+  noticeText: {
+    color: '#FFD166',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  itemMiniGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 9,
+  },
+  itemMini: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    minHeight: 76,
+    borderRadius: 14,
+    borderWidth: 1,
+    backgroundColor: '#091827',
+    padding: 10,
+    gap: 8,
+  },
+  itemMiniName: {
+    color: '#F6FBFF',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  latestBox: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  latestValue: {
+    color: '#F6FBFF',
+    fontSize: 19,
+    fontWeight: '900',
+  },
+  latestMeta: {
+    color: '#9EB4C5',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  emptyText: {
+    color: '#9EB4C5',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  missionCard: {
+    flexDirection: 'row',
+    gap: 10,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 12,
+  },
+  missionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#172A3F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  missionIconDone: {
+    backgroundColor: '#72E6C7',
+  },
+  missionBody: {
+    flex: 1,
+    gap: 7,
+  },
+  missionTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  missionTitle: {
+    flex: 1,
+    color: '#F6FBFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  missionCount: {
+    color: '#FFD166',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  missionText: {
+    color: '#AFC2D2',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  rewardText: {
+    color: '#72E6C7',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  listStack: {
+    gap: 10,
+  },
+  rarityPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 99,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  rarityText: {
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  buildStats: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  equipmentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 9,
+  },
+  equipmentSlot: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    minHeight: 72,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#28465B',
+    backgroundColor: '#091827',
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  slotIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#102236',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotTextWrap: {
+    flex: 1,
+  },
+  slotLabel: {
+    color: '#91A9BC',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  slotItem: {
+    color: '#F6FBFF',
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  setList: {
+    gap: 5,
+  },
+  setLine: {
+    color: '#72E6C7',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  inventoryList: {
+    gap: 12,
+  },
+  itemCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    backgroundColor: '#091827',
+    padding: 12,
+    gap: 10,
+  },
+  itemCardTop: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  itemIcon: {
+    width: 42,
+    height: 42,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  itemInfo: {
+    flex: 1,
     gap: 4,
   },
+  itemName: {
+    color: '#F6FBFF',
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '900',
+  },
+  itemFlavor: {
+    color: '#AFC2D2',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  itemMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  itemPower: {
+    color: '#D8E7F3',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  itemLore: {
+    color: '#91A9BC',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  profileAvatar: {
+    width: 66,
+    height: 66,
+    borderRadius: 22,
+    backgroundColor: '#091827',
+    borderWidth: 1,
+    borderColor: '#28465B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  profileName: {
+    color: '#F6FBFF',
+    fontSize: 21,
+    fontWeight: '900',
+  },
+  profileLine: {
+    color: '#AFC2D2',
+    fontSize: 13,
+  },
+  historyList: {
+    gap: 9,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+    borderRadius: 14,
+    backgroundColor: '#091827',
+    borderWidth: 1,
+    borderColor: '#28465B',
+    padding: 11,
+  },
+  historyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#102236',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyText: {
+    flex: 1,
+  },
+  historyTitle: {
+    color: '#F6FBFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  historyMeta: {
+    color: '#9EB4C5',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  bottomNav: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 12,
+    minHeight: 68,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#294A61',
+    backgroundColor: 'rgba(7, 17, 31, 0.96)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 7,
+    paddingVertical: 7,
+  },
+  tabButton: {
+    flex: 1,
+    height: 52,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
   tabButtonActive: {
-    backgroundColor: '#2DD4BF',
+    backgroundColor: '#72E6C7',
   },
   tabLabel: {
-    color: '#C7D7E5',
+    color: '#C9D8E5',
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   tabLabelActive: {
     color: '#07111F',
   },
-  resetButton: {
-    alignSelf: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  magicOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(3, 8, 18, 0.28)',
+    paddingHorizontal: 26,
   },
-  resetText: {
-    color: '#8FA6BA',
-    fontSize: 12,
-    fontWeight: '800',
+  magicCard: {
+    width: '100%',
+    maxWidth: 330,
+    minHeight: 220,
+    borderRadius: 28,
+    borderWidth: 2,
+    backgroundColor: '#081322',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 22,
+    gap: 10,
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 10,
+  },
+  magicIcon: {
+    width: 78,
+    height: 78,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  magicParticle: {
+    position: 'absolute',
+    width: 8,
+    height: 24,
+    borderRadius: 99,
+  },
+  magicTitle: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  magicSubtitle: {
+    color: '#C9D8E5',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });

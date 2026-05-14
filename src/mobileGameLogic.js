@@ -2,9 +2,9 @@ import {
   ACHIEVEMENTS,
   DEFAULT_GAME_STATE,
   EMPTY_EQUIPMENT,
+  INVESTMENT_CATEGORIES,
   INVESTMENT_TYPES,
   ITEM_LIBRARY,
-  ITEM_REWARD_TRACKS,
   QUESTS,
   RARITY_META,
   SAVE_VERSION,
@@ -47,22 +47,16 @@ export function createInitialGameState(overrides = {}) {
 
 export function mergeGameState(savedState = {}) {
   const safeState = savedState && typeof savedState === 'object' ? savedState : {};
-
-  if (safeState.meta?.saveVersion && safeState.meta.saveVersion !== SAVE_VERSION) {
-    return clone(DEFAULT_GAME_STATE);
-  }
-
+  const incomingInventory = Array.isArray(safeState.inventory) ? safeState.inventory : [];
   const equipment = { ...EMPTY_EQUIPMENT, ...(safeState.equipment || {}) };
+  const inventory = [...new Set(incomingInventory.filter((itemId) => ITEM_MAP[itemId]))];
+
   for (const slot of SLOT_ORDER) {
     const itemId = equipment[slot.key];
-    if (itemId && !ITEM_MAP[itemId]) {
+    if (itemId && (!ITEM_MAP[itemId] || !inventory.includes(itemId))) {
       equipment[slot.key] = null;
     }
   }
-
-  const inventory = Array.isArray(safeState.inventory)
-    ? [...new Set(safeState.inventory.filter((itemId) => ITEM_MAP[itemId]))]
-    : [];
 
   return {
     ...clone(DEFAULT_GAME_STATE),
@@ -124,7 +118,7 @@ export function parseCurrencyInput(rawValue = '') {
   return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
 }
 
-function detectCurrency(rawText = '') {
+function detectCurrency(rawText = '', fallback = 'BRL') {
   const source = String(rawText);
   const normalized = normalizeText(source);
 
@@ -132,7 +126,7 @@ function detectCurrency(rawText = '') {
     return 'USD';
   }
 
-  return 'BRL';
+  return fallback || 'BRL';
 }
 
 export function extractAmountFromText(rawText = '') {
@@ -160,19 +154,33 @@ export function extractAmountFromText(rawText = '') {
   return 0;
 }
 
-export function classifyInvestment(rawText = '') {
+export function getInvestmentCategories() {
+  return INVESTMENT_CATEGORIES;
+}
+
+export function getInvestmentTypesByCategory(categoryKey) {
+  return Object.entries(INVESTMENT_TYPES)
+    .filter(([, config]) => !categoryKey || config.category === categoryKey)
+    .map(([key, config]) => ({ key, ...config }));
+}
+
+export function classifyInvestment(rawText = '', explicitTypeKey = '') {
+  if (explicitTypeKey && INVESTMENT_TYPES[explicitTypeKey]) {
+    return {
+      typeKey: explicitTypeKey,
+      confidence: 1,
+      matchedKeywords: ['seleção manual'],
+    };
+  }
+
   const normalized = normalizeText(rawText);
   let bestMatch = {
-    typeKey: 'aporte-manual',
-    confidence: 0.35,
+    typeKey: 'tesouro-selic',
+    confidence: 0.2,
     matchedKeywords: [],
   };
 
   Object.entries(INVESTMENT_TYPES).forEach(([typeKey, config]) => {
-    if (!config.keywords.length) {
-      return;
-    }
-
     const matchedKeywords = config.keywords.filter((keyword) => {
       return normalized.includes(normalizeText(keyword));
     });
@@ -190,62 +198,24 @@ export function classifyInvestment(rawText = '') {
   return bestMatch;
 }
 
-function getBonusMultiplier(typeKey, equipment = {}) {
-  const activeBonuses = getActiveSetBonuses(equipment);
-  return activeBonuses.reduce((multiplier, bonus) => {
-    const setConfig = SET_BONUSES[bonus.setName];
-    if (setConfig?.affectedTypes?.includes(typeKey)) {
-      return Math.max(multiplier, bonus.xpMultiplier || 1);
-    }
-    return multiplier;
-  }, 1);
-}
-
-export function analyzeInvestmentPayload({
-  transcript = '',
-  manualAmount = '',
-  equipment = {},
-  exchangeRates = {},
-  now = new Date(),
-} = {}) {
-  const text = String(transcript || '');
-  const classification = classifyInvestment(text);
-  const originalCurrency = detectCurrency(text || manualAmount);
-  const originalAmount = extractAmountFromText(text) || parseCurrencyInput(manualAmount);
-  const exchangeRate = originalCurrency === 'USD' ? Number(exchangeRates.usdBrl || exchangeRates.USD_BRL || 5) : 1;
-  const amount = originalCurrency === 'USD' ? Number((originalAmount * exchangeRate).toFixed(2)) : originalAmount;
-  const typeConfig = INVESTMENT_TYPES[classification.typeKey] || INVESTMENT_TYPES['aporte-manual'];
-  const amountFactor = Math.max(1, Math.log10(Math.max(10, amount || 10)));
-  const xpMultiplier = getBonusMultiplier(classification.typeKey, equipment);
-  const xpGranted = Math.round((typeConfig.baseXp + amountFactor * 28) * xpMultiplier);
-  const powerGranted = Math.round(typeConfig.power + amountFactor * 7);
+export function analyzeOcrText(rawText = '') {
+  const classification = classifyInvestment(rawText);
+  const amount = extractAmountFromText(rawText);
+  const currency = detectCurrency(rawText);
+  const typeConfig = INVESTMENT_TYPES[classification.typeKey];
 
   return {
-    typeKey: classification.typeKey,
-    typeTitle: typeConfig.title,
-    category: typeConfig.category,
     amount,
-    originalAmount,
-    originalCurrency,
-    exchangeRate,
-    wasConverted: originalCurrency !== 'BRL',
-    xpGranted,
-    powerGranted,
-    confidence: classification.confidence,
+    currency,
+    typeKey: classification.typeKey,
+    category: typeConfig.category,
+    confidence: amount > 0 ? classification.confidence : Math.min(0.35, classification.confidence),
     matchedKeywords: classification.matchedKeywords,
-    learning: typeConfig.learning,
-    createdAt: now instanceof Date ? now.toISOString() : new Date(now).toISOString(),
+    summary:
+      amount > 0
+        ? `OCR identificou ${typeConfig.title} no valor de ${formatCurrency(amount, currency)}.`
+        : 'OCR não encontrou valor confiável. Confira o comprovante ou digite a quantia manualmente.',
   };
-}
-
-export function getOwnedItems(inventory = []) {
-  return [...new Set(inventory)].map((itemId) => ITEM_MAP[itemId]).filter(Boolean);
-}
-
-export function getNextItemReward(typeKey = 'aporte-manual', inventory = []) {
-  const owned = new Set(inventory);
-  const track = ITEM_REWARD_TRACKS[typeKey]?.length ? ITEM_REWARD_TRACKS[typeKey] : ITEM_REWARD_TRACKS['aporte-manual'];
-  return track.map((itemId) => ITEM_MAP[itemId]).find((item) => item && !owned.has(item.id)) || null;
 }
 
 export function getSetCounts(equipment = {}) {
@@ -284,6 +254,174 @@ export function getUniqueEquippedItems(equipment = {}) {
   return [...new Set(Object.values(equipment).filter(Boolean))].map((itemId) => ITEM_MAP[itemId]).filter(Boolean);
 }
 
+export function getEquipmentMultipliers(equipment = {}) {
+  const equippedItems = getUniqueEquippedItems(equipment);
+  const itemXp = equippedItems.reduce((multiplier, item) => multiplier * Number(item.xpMultiplier || 1), 1);
+  const itemDrop = equippedItems.reduce((multiplier, item) => multiplier * Number(item.itemDropMultiplier || 1), 1);
+  const setBonuses = getActiveSetBonuses(equipment);
+  const setXp = setBonuses.reduce((multiplier, bonus) => multiplier * Number(bonus.xpMultiplier || 1), 1);
+  const setDrop = setBonuses.reduce((multiplier, bonus) => multiplier * Number(bonus.itemDropMultiplier || 1), 1);
+
+  return {
+    xpMultiplier: Number((itemXp * setXp).toFixed(3)),
+    itemDropMultiplier: Number((itemDrop * setDrop).toFixed(3)),
+    equippedItems,
+    setBonuses,
+  };
+}
+
+function seededRandom(seed) {
+  let value = 0;
+  const source = String(seed);
+  for (let index = 0; index < source.length; index += 1) {
+    value = (value * 31 + source.charCodeAt(index)) >>> 0;
+  }
+  value = (value + 0x6d2b79f5) | 0;
+  value = Math.imul(value ^ (value >>> 15), value | 1);
+  value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+  return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+}
+
+export function calculateDropChances(amount = 0, itemDropMultiplier = 1) {
+  const safeAmount = Math.max(0, Number(amount || 0));
+  const amountBoost = Math.min(5, Math.log10(Math.max(10, safeAmount)) - 1);
+  const entries = Object.entries(RARITY_META).map(([rarity, meta]) => {
+    const unlocked = safeAmount >= meta.minAmount;
+    const rarityBoost =
+      rarity === 'comum'
+        ? Math.max(10, meta.baseWeight - amountBoost * 7)
+        : meta.baseWeight * (1 + amountBoost * (rarity === 'artefato' ? 0.9 : 0.55));
+    const weight = unlocked ? Math.max(0.5, rarityBoost * itemDropMultiplier) : 0;
+    return { rarity, weight };
+  });
+  const total = entries.reduce((sum, entry) => sum + entry.weight, 0) || 1;
+
+  return entries.map((entry) => ({
+    rarity: entry.rarity,
+    chance: entry.weight / total,
+  }));
+}
+
+function chooseRarity(amount, itemDropMultiplier, seed) {
+  const chances = calculateDropChances(amount, itemDropMultiplier);
+  const roll = seededRandom(seed);
+  let cursor = 0;
+
+  for (const entry of chances) {
+    cursor += entry.chance;
+    if (roll <= cursor) {
+      return entry.rarity;
+    }
+  }
+
+  return 'comum';
+}
+
+function candidateScore(item, typeKey, categoryKey, amount) {
+  let score = 0;
+  if (item.type === typeKey) score += 8;
+  if (item.category === categoryKey) score += 4;
+  if (amount >= item.requiredAmount) score += 4;
+  score += item.power / 20;
+  return score;
+}
+
+export function rollItemDrops({
+  typeKey,
+  amount,
+  inventory = [],
+  equipment = {},
+  seed = Date.now(),
+} = {}) {
+  const typeConfig = INVESTMENT_TYPES[typeKey] || INVESTMENT_TYPES['tesouro-selic'];
+  const { itemDropMultiplier } = getEquipmentMultipliers(equipment);
+  const safeAmount = Math.max(0, Number(amount || 0));
+  const baseDropCount = 1 + (safeAmount >= 1500 ? 1 : 0) + (safeAmount >= 5000 ? 1 : 0);
+  const bonusDrop = seededRandom(`${seed}-bonus`) < Math.min(0.45, (itemDropMultiplier - 1) * 0.7) ? 1 : 0;
+  const dropCount = Math.min(3, baseDropCount + bonusDrop);
+  const owned = new Set(inventory);
+  const drops = [];
+  let duplicateCount = 0;
+
+  for (let index = 0; index < dropCount; index += 1) {
+    const rarity = chooseRarity(safeAmount, itemDropMultiplier, `${seed}-${index}`);
+    const candidates = ITEM_LIBRARY
+      .filter((item) => item.rarity === rarity)
+      .filter((item) => safeAmount >= item.requiredAmount * 0.7)
+      .sort((a, b) => candidateScore(b, typeKey, typeConfig.category, safeAmount) - candidateScore(a, typeKey, typeConfig.category, safeAmount));
+    const fallbackCandidates = ITEM_LIBRARY
+      .filter((item) => safeAmount >= item.requiredAmount * 0.7)
+      .sort((a, b) => candidateScore(b, typeKey, typeConfig.category, safeAmount) - candidateScore(a, typeKey, typeConfig.category, safeAmount));
+    const pool = candidates.length ? candidates : fallbackCandidates;
+
+    if (!pool.length) {
+      continue;
+    }
+
+    const pickIndex = Math.floor(seededRandom(`${seed}-pick-${index}`) * pool.length);
+    const picked = pool[pickIndex];
+    if (owned.has(picked.id) || drops.some((drop) => drop.id === picked.id)) {
+      duplicateCount += 1;
+      continue;
+    }
+
+    drops.push(picked);
+  }
+
+  return {
+    drops,
+    duplicateCount,
+    itemDropMultiplier,
+    chances: calculateDropChances(safeAmount, itemDropMultiplier),
+  };
+}
+
+export function analyzeInvestmentPayload({
+  transcript = '',
+  manualAmount = '',
+  typeKey = '',
+  currency = 'BRL',
+  equipment = {},
+  exchangeRates = {},
+  now = new Date(),
+} = {}) {
+  const text = String(transcript || '');
+  const classification = classifyInvestment(text, typeKey);
+  const originalCurrency = detectCurrency(text, currency);
+  const manualValue = parseCurrencyInput(manualAmount);
+  const originalAmount = manualValue || extractAmountFromText(text);
+  const exchangeRate = originalCurrency === 'USD' ? Number(exchangeRates.usdBrl || exchangeRates.USD_BRL || 5) : 1;
+  const amount = originalCurrency === 'USD' ? Number((originalAmount * exchangeRate).toFixed(2)) : originalAmount;
+  const typeConfig = INVESTMENT_TYPES[classification.typeKey] || INVESTMENT_TYPES['tesouro-selic'];
+  const amountFactor = Math.max(1, Math.log10(Math.max(10, amount || 10)));
+  const { xpMultiplier, itemDropMultiplier } = getEquipmentMultipliers(equipment);
+  const xpGranted = Math.round((typeConfig.baseXp + amountFactor * 32) * xpMultiplier);
+  const powerGranted = Math.round(typeConfig.power + amountFactor * 8);
+
+  return {
+    typeKey: classification.typeKey,
+    typeTitle: typeConfig.title,
+    category: typeConfig.category,
+    amount,
+    originalAmount,
+    originalCurrency,
+    exchangeRate,
+    wasConverted: originalCurrency !== 'BRL',
+    xpGranted,
+    powerGranted,
+    xpMultiplier,
+    itemDropMultiplier,
+    confidence: classification.confidence,
+    matchedKeywords: classification.matchedKeywords,
+    learning: typeConfig.learning,
+    createdAt: now instanceof Date ? now.toISOString() : new Date(now).toISOString(),
+  };
+}
+
+export function getOwnedItems(inventory = []) {
+  return [...new Set(inventory)].map((itemId) => ITEM_MAP[itemId]).filter(Boolean);
+}
+
 export function calculateProfilePower(equipment = {}, history = []) {
   const equippedPower = getUniqueEquippedItems(equipment).reduce((total, item) => total + (item.power || 0), 0);
   const setPower = getActiveSetBonuses(equipment).reduce((total, bonus) => total + (bonus.power || 0), 0);
@@ -316,7 +454,7 @@ export function getHistorySummary(history = []) {
     categoryCount: Object.keys(byCategory).length,
     fixedIncomeAmount: Object.entries(byType).reduce((total, [typeKey, amount]) => {
       const category = INVESTMENT_TYPES[typeKey]?.category;
-      return category === 'renda fixa' ? total + amount : total;
+      return category === 'renda-fixa' ? total + amount : total;
     }, 0),
     byType,
     byCategory,
@@ -325,6 +463,7 @@ export function getHistorySummary(history = []) {
 
 function metricValue(metric, context) {
   const largestSet = Math.max(0, ...Object.values(getSetCounts(context.equipment || {})));
+  const ownedItems = getOwnedItems(context.inventory || []);
 
   switch (metric) {
     case 'historyCount':
@@ -339,6 +478,10 @@ function metricValue(metric, context) {
       return context.power?.total || 0;
     case 'largestSet':
       return largestSet;
+    case 'inventoryCount':
+      return ownedItems.length;
+    case 'artifactCount':
+      return ownedItems.filter((item) => item.rarity === 'artefato').length;
     case 'exportCount':
       return context.exportCount || 0;
     default:
@@ -368,9 +511,9 @@ export function getAchievementStatuses(context = {}) {
 
 export function getLevelState(totalXp = 0) {
   const safeXp = Math.max(0, Number(totalXp || 0));
-  const level = Math.floor(Math.sqrt(safeXp / 120)) + 1;
-  const currentLevelXp = (level - 1) ** 2 * 120;
-  const nextLevelXp = level ** 2 * 120;
+  const level = Math.floor(Math.sqrt(safeXp / 140)) + 1;
+  const currentLevelXp = (level - 1) ** 2 * 140;
+  const nextLevelXp = level ** 2 * 140;
   const progress = nextLevelXp === currentLevelXp ? 1 : (safeXp - currentLevelXp) / (nextLevelXp - currentLevelXp);
 
   return {
@@ -382,26 +525,30 @@ export function getLevelState(totalXp = 0) {
   };
 }
 
-export function getAdvisorLine({ history = [], summary = getHistorySummary(history), equipment = {} } = {}) {
+export function getAdvisorLine({ history = [], summary = getHistorySummary(history), equipment = {}, inventory = [] } = {}) {
   const activeBonuses = getActiveSetBonuses(equipment);
 
   if (!history.length) {
-    return 'Comece por um registro simples. O primeiro comprovante válido já mostra como a jornada transforma dados em aprendizado.';
+    return 'Registre um aporte para invocar o primeiro drop. Valor maior aumenta a chance de item raro.';
+  }
+
+  if (!inventory.length) {
+    return 'Você já tem registros, mas ainda não recebeu equipamento. Tente um aporte com categoria pré-definida.';
   }
 
   if (summary.fixedIncomeAmount < 1000) {
-    return 'Sua base de reserva ainda pode crescer. Tesouro Selic, CDB ou LCI/LCA são próximos passos coerentes.';
+    return 'Sua muralha defensiva ainda pode crescer. Tesouro Selic, CDB ou LCI/LCA fortalecem a base.';
   }
 
   if (summary.categoryCount < 3) {
-    return 'Você já tem consistência. O próximo passo é comparar categorias para reduzir concentração.';
+    return 'A carteira já tem força inicial. Explore novas categorias para ganhar drops mais variados.';
   }
 
   if (!activeBonuses.length) {
-    return 'Equipe marcos da mesma trilha para ativar bônus educacionais e enxergar melhor sua estratégia.';
+    return 'Equipe peças do mesmo conjunto para ativar bônus de XP e chance de drop.';
   }
 
-  return 'A jornada está bem distribuída. Continue revisando risco, prazo, liquidez e objetivo antes de novos aportes.';
+  return 'A build está ficando forte. Continue equilibrando valor, risco, prazo e equipamento.';
 }
 
 export function formatCurrency(value = 0, currency = 'BRL') {
@@ -440,9 +587,11 @@ export function buildCsv(history = []) {
     'moeda_original',
     'cotacao',
     'xp',
-    'pontuacao',
+    'poder',
+    'multiplicador_xp',
+    'multiplicador_drop',
+    'drops',
     'hash',
-    'arquivo',
   ];
   const rows = history.map((entry) => [
     entry.id,
@@ -455,8 +604,10 @@ export function buildCsv(history = []) {
     String(entry.exchangeRate || 1),
     String(entry.xpGranted || 0),
     String(entry.powerGranted || 0),
+    String(entry.xpMultiplier || 1),
+    String(entry.itemDropMultiplier || 1),
+    (entry.droppedItems || []).map((item) => item.name).join(', '),
     entry.hash || '',
-    entry.proofName || '',
   ]);
 
   return [header, ...rows]
@@ -468,14 +619,19 @@ export function buildCsv(history = []) {
     .join('\n');
 }
 
-export function equipFirstCompatibleItem(state, itemId) {
-  const item = ITEM_MAP[itemId];
-  if (!item) {
-    return state;
-  }
+function findSlotForItem(item, equipment = {}) {
+  if (!item) return null;
+  const direct = SLOT_ORDER.find((slot) => slot.key === item.slot);
+  if (direct) return direct.key;
+  const accepted = SLOT_ORDER.find((slot) => slot.accepts?.includes(item.slot) && !equipment[slot.key]);
+  if (accepted) return accepted.key;
+  return SLOT_ORDER.find((slot) => slot.accepts?.includes(item.slot))?.key || null;
+}
 
-  const slot = SLOT_ORDER.find((entry) => entry.key === item.slot || entry.accepts?.includes(item.slot));
-  if (!slot) {
+export function equipItem(state, itemId) {
+  const item = ITEM_MAP[itemId];
+  const slotKey = findSlotForItem(item, state.equipment);
+  if (!item || !slotKey) {
     return state;
   }
 
@@ -483,9 +639,23 @@ export function equipFirstCompatibleItem(state, itemId) {
     ...state,
     equipment: {
       ...state.equipment,
-      [slot.key]: item.id,
+      [slotKey]: item.id,
     },
   };
+}
+
+export function autoEquipBestDrops(state, drops = []) {
+  return drops
+    .sort((a, b) => b.power - a.power)
+    .reduce((nextState, item) => {
+      const slotKey = findSlotForItem(item, nextState.equipment);
+      if (!slotKey) return nextState;
+      const equipped = ITEM_MAP[nextState.equipment[slotKey]];
+      if (!equipped || item.power > equipped.power) {
+        return equipItem(nextState, item.id);
+      }
+      return nextState;
+    }, state);
 }
 
 export function getRarityMeta(rarity = 'comum') {
