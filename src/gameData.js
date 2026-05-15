@@ -1,17 +1,17 @@
 export const APP_NAME = 'Finance Quest';
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export const SLOT_ORDER = [
-  { key: 'head', label: 'Elmo', description: 'Planejamento e visão de risco.' },
-  { key: 'shoulders', label: 'Ombreiras', description: 'Proteção e reserva.' },
-  { key: 'chest', label: 'Armadura', description: 'Consistência financeira.' },
-  { key: 'hands', label: 'Luvas', description: 'Execução e registro.' },
-  { key: 'neck', label: 'Amuleto', description: 'Leitura de mercado.' },
-  { key: 'mainHand', label: 'Arma principal', description: 'Estratégia de aporte.' },
-  { key: 'offHand', label: 'Tomo', description: 'Comparação e estudo.' },
-  { key: 'feet', label: 'Botas', description: 'Mobilidade entre classes de ativos.' },
-  { key: 'ring1', label: 'Anel I', accepts: ['ring'], description: 'Hábito.' },
-  { key: 'ring2', label: 'Anel II', accepts: ['ring'], description: 'Revisão.' },
+  { key: 'head', label: 'Elmo', description: 'Planejamento' },
+  { key: 'shoulders', label: 'Ombreiras', description: 'Liquidez' },
+  { key: 'chest', label: 'Armadura', description: 'Crédito' },
+  { key: 'hands', label: 'Luvas', description: 'Registro' },
+  { key: 'neck', label: 'Amuleto', description: 'Renda e mercado' },
+  { key: 'mainHand', label: 'Lâmina', description: 'Risco e aporte' },
+  { key: 'offHand', label: 'Grimório', description: 'Estudo' },
+  { key: 'feet', label: 'Botas', description: 'Diversificação' },
+  { key: 'ring1', label: 'Anel I', accepts: ['ring'], description: 'Hábito' },
+  { key: 'ring2', label: 'Anel II', accepts: ['ring'], description: 'Revisão' },
 ];
 
 export const EMPTY_EQUIPMENT = SLOT_ORDER.reduce((equipment, slot) => {
@@ -70,42 +70,42 @@ export const RARITY_META = {
 export const CHARACTER_RACES = [
   {
     key: 'guardiao',
-    label: 'Guardião da Reserva',
-    bonus: 'Começa com foco em segurança, liquidez e proteção.',
+    label: 'Perfil Conservador',
+    bonus: 'Prioriza segurança, liquidez e previsibilidade antes de buscar retorno maior.',
   },
   {
     key: 'arcanista',
-    label: 'Arcanista dos Índices',
-    bonus: 'Valoriza leitura de dados, diversificação e consistência.',
+    label: 'Perfil Analítico',
+    bonus: 'Compara dados, taxas, prazos e diversificação antes de registrar um aporte.',
   },
   {
     key: 'mercador',
-    label: 'Mercador Estratégico',
-    bonus: 'Compara oportunidades, custos e prazos antes de agir.',
+    label: 'Perfil Estratégico',
+    bonus: 'Organiza objetivos, custos e riscos para decidir com mais clareza.',
   },
 ];
 
 export const CHARACTER_CLASSES = [
   {
     key: 'renda-fixa',
-    label: 'Sentinela da Renda Fixa',
-    bonus: 'Prioriza reserva, previsibilidade e disciplina.',
+    label: 'Reserva e Renda Fixa',
+    bonus: 'Começa pela formação de reserva e pelo entendimento de crédito, liquidez e juros.',
   },
   {
     key: 'diversificacao',
-    label: 'Explorador Global',
-    bonus: 'Busca classes diferentes com risco consciente.',
+    label: 'Diversificação',
+    bonus: 'Busca classes diferentes sem concentrar tudo no mesmo tipo de risco.',
   },
   {
     key: 'longo-prazo',
-    label: 'Cronomante do Longo Prazo',
-    bonus: 'Usa tempo, juros compostos e revisão periódica.',
+    label: 'Longo Prazo',
+    bonus: 'Usa tempo, juros compostos e revisão periódica para objetivos maiores.',
   },
 ];
 
 export const INVESTMENT_CATEGORIES = [
   { key: 'renda-fixa', label: 'Renda fixa', icon: 'shield-half-full' },
-  { key: 'renda-variavel', label: 'Renda variável', icon: 'sword-cross' },
+  { key: 'renda-variavel', label: 'Renda variável', icon: 'chart-line' },
   { key: 'fundos', label: 'Fundos e ETFs', icon: 'chart-donut' },
   { key: 'global', label: 'Global', icon: 'earth' },
   { key: 'longo-prazo', label: 'Longo prazo', icon: 'timer-sand-complete' },
@@ -128,7 +128,7 @@ export const INVESTMENT_TYPES = {
     keywords: ['tesouro ipca', 'ipca+', 'ntn-b', 'inflação', 'inflacao'],
     baseXp: 110,
     power: 22,
-    icon: 'fire-shield',
+    icon: 'chart-bell-curve-cumulative',
     learning:
       'Ajuda a pensar em proteção contra inflação quando o objetivo tem prazo mais longo.',
   },
@@ -204,14 +204,189 @@ export const INVESTMENT_TYPES = {
   },
 };
 
+export const SOURCE_REFERENCES = [
+  {
+    label: 'CVM / Portal do Investidor',
+    focus: 'Riscos, fundos imobiliários, ETFs e tomada de decisão consciente.',
+    url: 'https://www.gov.br/investidor/pt-br',
+  },
+  {
+    label: 'ANBIMA Como Investir',
+    focus: 'Conceitos, fundos, ETFs, risco e custos em linguagem educativa.',
+    url: 'https://comoinvestir.anbima.com.br/',
+  },
+  {
+    label: 'Tesouro Direto',
+    focus: 'Tesouro Selic, Tesouro IPCA+, resgate antecipado e marcação a mercado.',
+    url: 'https://www.tesourodireto.com.br/',
+  },
+  {
+    label: 'FGC',
+    focus: 'Cobertura de CDB, LCI/LCA e limites de garantia.',
+    url: 'https://www.fgc.org.br/sobre-garantia-fgc',
+  },
+  {
+    label: 'Banco Central',
+    focus: 'Educação financeira, risco de crédito e cuidado com promessas de retorno.',
+    url: 'https://www.bcb.gov.br/cidadaniafinanceira',
+  },
+];
+
+export const INVESTMENT_GUIDE = {
+  'tesouro-selic': {
+    riskLevel: 'Baixo',
+    riskTone: 'low',
+    objective: 'Reserva de emergência e dinheiro com prazo curto.',
+    liquidity: 'Alta no Tesouro Direto, com recompra em dias úteis pelo Tesouro Nacional.',
+    guarantee: 'Título público federal; não usa FGC.',
+    costs: 'Pode ter IR regressivo e taxa de custódia conforme regras do Tesouro.',
+    summary:
+      'É a opção mais simples para começar em títulos públicos e costuma oscilar menos em caso de venda antecipada.',
+    risks: [
+      'Ainda existe risco soberano, mesmo sendo baixo no contexto brasileiro.',
+      'A rentabilidade acompanha juros básicos e pode não ser a melhor para objetivos longos.',
+      'Impostos e taxas reduzem o rendimento líquido.',
+    ],
+    checklist: ['Comparar com CDI e taxa líquida', 'Confirmar prazo de resgate', 'Usar para reserva antes de buscar risco maior'],
+  },
+  'tesouro-ipca': {
+    riskLevel: 'Médio',
+    riskTone: 'medium',
+    objective: 'Objetivos de médio e longo prazo com proteção contra inflação.',
+    liquidity: 'Tem recompra pelo Tesouro, mas o preço pode variar antes do vencimento.',
+    guarantee: 'Título público federal; não usa FGC.',
+    costs: 'Pode ter IR regressivo e taxa de custódia conforme regras do Tesouro.',
+    summary:
+      'Combina IPCA com uma taxa fixa. Faz mais sentido quando o prazo do título conversa com o objetivo.',
+    risks: [
+      'Marcação a mercado pode gerar perda se vender antes do vencimento.',
+      'Quanto maior o prazo, maior tende a ser a sensibilidade às taxas de juros.',
+      'Não é ideal para reserva de emergência.',
+    ],
+    checklist: ['Definir data do objetivo', 'Evitar venda antecipada por impulso', 'Entender marcação a mercado'],
+  },
+  cdb: {
+    riskLevel: 'Baixo a médio',
+    riskTone: 'medium',
+    objective: 'Renda fixa bancária para reserva, metas ou prazos definidos.',
+    liquidity: 'Varia por produto: diária, no vencimento ou com carência.',
+    guarantee: 'Pode ter cobertura do FGC dentro dos limites vigentes.',
+    costs: 'Geralmente tem IR regressivo; comparar rentabilidade líquida.',
+    summary:
+      'É um empréstimo ao banco emissor. A taxa maior pode compensar prazo, liquidez menor ou risco do emissor.',
+    risks: [
+      'Risco de crédito do banco emissor.',
+      'Pode não permitir resgate antes do vencimento.',
+      'Rentabilidade bruta pode parecer melhor do que a líquida.',
+    ],
+    checklist: ['Ver emissor e rating quando houver', 'Conferir liquidez', 'Calcular rendimento líquido'],
+  },
+  'lci-lca': {
+    riskLevel: 'Baixo a médio',
+    riskTone: 'medium',
+    objective: 'Renda fixa isenta de IR para pessoa física, com foco em prazos definidos.',
+    liquidity: 'Costuma ter carência e pode não servir para dinheiro de emergência.',
+    guarantee: 'Pode ter cobertura do FGC dentro dos limites vigentes.',
+    costs: 'Isenção de IR para pessoa física, mas a taxa deve ser comparada com CDB líquido.',
+    summary:
+      'LCI e LCA são letras de crédito ligadas ao mercado imobiliário ou ao agronegócio.',
+    risks: [
+      'Risco de crédito da instituição emissora.',
+      'Carência pode reduzir flexibilidade.',
+      'Taxa menor pode não compensar mesmo com isenção de IR.',
+    ],
+    checklist: ['Comparar com CDB líquido', 'Ver carência', 'Conferir se o emissor é coberto pelo FGC'],
+  },
+  fii: {
+    riskLevel: 'Médio a alto',
+    riskTone: 'high',
+    objective: 'Exposição ao mercado imobiliário e possível renda recorrente.',
+    liquidity: 'Negociado em bolsa; liquidez varia por fundo.',
+    guarantee: 'Não tem FGC.',
+    costs: 'Pode haver taxas do fundo, custos de corretagem e tributação específica.',
+    summary:
+      'FIIs reúnem investidores para aplicar em imóveis, recebíveis ou estratégias imobiliárias.',
+    risks: [
+      'Vacância, inadimplência e revisão de contratos podem reduzir rendimentos.',
+      'Cotas oscilam em bolsa e sofrem com juros e percepção de risco.',
+      'Liquidez pode ser baixa em fundos menores.',
+    ],
+    checklist: ['Ver relatório gerencial', 'Checar vacância e concentração', 'Entender fonte dos rendimentos'],
+  },
+  acao: {
+    riskLevel: 'Alto',
+    riskTone: 'high',
+    objective: 'Participar do crescimento de empresas no longo prazo.',
+    liquidity: 'Negociada em bolsa; varia conforme a empresa.',
+    guarantee: 'Não tem FGC.',
+    costs: 'Pode haver corretagem, emolumentos e IR conforme operação.',
+    summary:
+      'Ação representa uma fração de uma empresa. O retorno depende de resultado, preço e expectativa do mercado.',
+    risks: [
+      'Preço pode oscilar muito no curto prazo.',
+      'Empresa pode piorar resultados, governança ou endividamento.',
+      'Concentrar em poucas ações aumenta o risco específico.',
+    ],
+    checklist: ['Ler fundamentos básicos', 'Diversificar setores', 'Investir com horizonte maior'],
+  },
+  etf: {
+    riskLevel: 'Médio a alto',
+    riskTone: 'high',
+    objective: 'Diversificar seguindo um índice de mercado.',
+    liquidity: 'Negociado em bolsa; depende do ETF e do formador de mercado.',
+    guarantee: 'Não tem FGC.',
+    costs: 'Possui taxa de administração e tributação própria.',
+    summary:
+      'ETF é um fundo negociado em bolsa que busca acompanhar um índice, como ações, renda fixa ou exterior.',
+    risks: [
+      'Oscila conforme os ativos do índice.',
+      'ETFs internacionais podem ter risco cambial.',
+      'Nem todo índice é bem diversificado.',
+    ],
+    checklist: ['Entender o índice', 'Ver taxa e liquidez', 'Checar exposição cambial ou setorial'],
+  },
+  bdr: {
+    riskLevel: 'Alto',
+    riskTone: 'high',
+    objective: 'Ter exposição a empresas ou ativos negociados no exterior.',
+    liquidity: 'Negociado na B3; liquidez varia por recibo.',
+    guarantee: 'Não tem FGC.',
+    costs: 'Pode haver custos de negociação, tributação e impacto cambial.',
+    summary:
+      'BDR é um recibo negociado no Brasil que representa ativo emitido fora do país.',
+    risks: [
+      'Variação cambial pode afetar o resultado em reais.',
+      'O ativo original pode oscilar por fatores internacionais.',
+      'Liquidez e informação podem ser diferentes das ações brasileiras.',
+    ],
+    checklist: ['Entender empresa/índice de origem', 'Considerar câmbio', 'Evitar concentração geográfica'],
+  },
+  'fundo-previdencia': {
+    riskLevel: 'Médio',
+    riskTone: 'medium',
+    objective: 'Planejamento de aposentadoria e objetivos longos.',
+    liquidity: 'Regras de resgate variam por fundo e plano.',
+    guarantee: 'Não tem FGC; depende da carteira e da seguradora/gestora.',
+    costs: 'Avaliar taxa de administração, tributação, tabela PGBL/VGBL e portabilidade.',
+    summary:
+      'Previdência combina horizonte longo, benefício tributário potencial e gestão profissional.',
+    risks: [
+      'Taxas altas podem reduzir muito o retorno no longo prazo.',
+      'Escolha errada de tributação pode prejudicar o objetivo.',
+      'Carteira do fundo pode ter risco de mercado.',
+    ],
+    checklist: ['Comparar taxa de administração', 'Escolher PGBL ou VGBL com critério', 'Revisar portabilidade'],
+  },
+};
+
 export const SET_BONUSES = {
   'Ordem da Reserva Estável': {
     category: 'renda-fixa',
     affectedTypes: ['tesouro-selic', 'tesouro-ipca', 'cdb', 'lci-lca'],
-    lore: 'Conjunto defensivo para reserva, liquidez e renda fixa consciente.',
+    lore: 'Arsenal defensivo para reserva, liquidez e renda fixa consciente.',
     bonuses: [
       { pieces: 2, label: '+10% XP em renda fixa', xpMultiplier: 1.1, itemDropMultiplier: 1.03, power: 12 },
-      { pieces: 4, label: '+18% XP e +8% chance de drop', xpMultiplier: 1.18, itemDropMultiplier: 1.08, power: 18 },
+      { pieces: 4, label: '+18% XP e +8% chance de item', xpMultiplier: 1.18, itemDropMultiplier: 1.08, power: 18 },
     ],
   },
   'Conclave da Diversificação': {
@@ -220,7 +395,7 @@ export const SET_BONUSES = {
     lore: 'Conjunto para comparar riscos, setores e moedas diferentes.',
     bonuses: [
       { pieces: 2, label: '+8% XP em ativos diversificados', xpMultiplier: 1.08, itemDropMultiplier: 1.04, power: 10 },
-      { pieces: 4, label: '+16% XP e +10% chance de drop', xpMultiplier: 1.16, itemDropMultiplier: 1.1, power: 16 },
+      { pieces: 4, label: '+16% XP e +10% chance de item', xpMultiplier: 1.16, itemDropMultiplier: 1.1, power: 16 },
     ],
   },
   'Círculo do Longo Prazo': {
@@ -249,8 +424,8 @@ export const ITEM_LIBRARY = [
     itemDropMultiplier: 1,
     icon: 'shield-sun-outline',
     bonusLabel: '+2% XP em registros',
-    flavor: 'Primeira peça de proteção contra decisões impulsivas.',
-    lore: 'Reserva de emergência é o escudo básico de qualquer jornada financeira.',
+    flavor: 'Protege contra decisões impulsivas antes do primeiro aporte.',
+    lore: 'Reserva de emergência é a defesa básica contra vender ativos no pior momento.',
   },
   {
     id: 'ombreiras-liquidez-diaria',
@@ -265,7 +440,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.04,
     itemDropMultiplier: 1.02,
     icon: 'shield-half-full',
-    bonusLabel: '+4% XP e +2% drop',
+    bonusLabel: '+4% XP e +2% item',
     flavor: 'Mantém recursos acessíveis quando a vida exige resposta rápida.',
     lore: 'Liquidez evita vender investimentos ruins no pior momento.',
   },
@@ -282,7 +457,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.08,
     itemDropMultiplier: 1.04,
     icon: 'bank-check',
-    bonusLabel: '+8% XP e +4% drop',
+    bonusLabel: '+8% XP e +4% item',
     flavor: 'Compara taxa, prazo, liquidez e proteção do FGC.',
     lore: 'Nem todo CDB serve ao mesmo objetivo; contexto importa.',
   },
@@ -299,13 +474,13 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.14,
     itemDropMultiplier: 1.08,
     icon: 'leaf-circle',
-    bonusLabel: '+14% XP e +8% drop',
+    bonusLabel: '+14% XP e +8% item',
     flavor: 'Transforma comparação líquida em disciplina de análise.',
     lore: 'Isenção de IR não dispensa análise de prazo, risco e liquidez.',
   },
   {
     id: 'tomo-ipca-horizonte',
-    name: 'Tomo IPCA+ do Horizonte',
+    name: 'Grimório IPCA+ do Horizonte',
     slot: 'offHand',
     type: 'tesouro-ipca',
     category: 'renda-fixa',
@@ -316,7 +491,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.2,
     itemDropMultiplier: 1.12,
     icon: 'book-lock-open-outline',
-    bonusLabel: '+20% XP e +12% drop',
+    bonusLabel: '+20% XP e +12% item',
     flavor: 'Brilha quando o objetivo precisa atravessar muitos anos.',
     lore: 'O IPCA+ pede entendimento de prazo e marcação a mercado.',
   },
@@ -333,7 +508,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.04,
     itemDropMultiplier: 1.03,
     icon: 'home-city-outline',
-    bonusLabel: '+4% XP e +3% drop',
+    bonusLabel: '+4% XP e +3% item',
     flavor: 'Revela vacância, contratos e recorrência de rendimentos.',
     lore: 'FIIs combinam renda, risco de mercado e risco imobiliário.',
   },
@@ -349,8 +524,8 @@ export const ITEM_LIBRARY = [
     power: 36,
     xpMultiplier: 1.09,
     itemDropMultiplier: 1.05,
-    icon: 'sword-cross',
-    bonusLabel: '+9% XP e +5% drop',
+    icon: 'chart-line',
+    bonusLabel: '+9% XP e +5% item',
     flavor: 'Corta ruído de curto prazo para enxergar valor e risco.',
     lore: 'Ações exigem leitura de negócio, preço, governança e horizonte.',
   },
@@ -367,8 +542,8 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.08,
     itemDropMultiplier: 1.05,
     icon: 'chart-box-outline',
-    bonusLabel: '+8% XP e +5% drop',
-    flavor: 'Atravessa mercados inteiros sem depender de um único ativo.',
+    bonusLabel: '+8% XP e +5% item',
+    flavor: 'Atravessam mercados inteiros sem depender de um único ativo.',
     lore: 'Índices ajudam a comparar carteira própria com referências amplas.',
   },
   {
@@ -384,7 +559,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.15,
     itemDropMultiplier: 1.09,
     icon: 'earth-arrow-right',
-    bonusLabel: '+15% XP e +9% drop',
+    bonusLabel: '+15% XP e +9% item',
     flavor: 'Aponta para empresas globais sem ignorar o câmbio.',
     lore: 'Ativos globais diversificam, mas adicionam variação cambial.',
   },
@@ -401,7 +576,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.14,
     itemDropMultiplier: 1.08,
     icon: 'ring',
-    bonusLabel: '+14% XP e +8% drop',
+    bonusLabel: '+14% XP e +8% item',
     flavor: 'Aumenta de poder quando o usuário mantém constância.',
     lore: 'Previdência exige atenção a tributação, taxas, portabilidade e horizonte.',
   },
@@ -418,7 +593,7 @@ export const ITEM_LIBRARY = [
     xpMultiplier: 1.24,
     itemDropMultiplier: 1.14,
     icon: 'creation',
-    bonusLabel: '+24% XP e +14% drop',
+    bonusLabel: '+24% XP e +14% item',
     flavor: 'Quanto mais tempo equipado, mais forte a disciplina parece.',
     lore: 'Tempo e consistência são grandes aliados dos juros compostos.',
   },
@@ -436,7 +611,7 @@ export const ITEM_LIBRARY = [
     itemDropMultiplier: 1,
     icon: 'file-document-edit-outline',
     bonusLabel: '+1% XP em registros',
-    flavor: 'Mesmo sem comprovante perfeito, a jornada continua.',
+    flavor: 'Mesmo sem comprovante perfeito, o registro continua.',
     lore: 'Registrar com consistência é melhor do que abandonar o acompanhamento.',
   },
 ];
@@ -449,23 +624,23 @@ export const ITEM_REWARD_TRACKS = Object.keys(INVESTMENT_TYPES).reduce((tracks, 
 export const QUESTS = [
   {
     id: 'primeiro-aporte',
-    title: 'Primeiro Aporte Arcano',
-    description: 'Registre o primeiro investimento e receba um drop inicial.',
+    title: 'Primeiro Registro',
+    description: 'Registre o primeiro investimento e receba um item educativo inicial.',
     target: 1,
     metric: 'historyCount',
-    reward: 'Libera o inventário e a primeira peça.',
+    reward: 'Libera o inventário e o primeiro conceito.',
   },
   {
     id: 'reserva-emergencia',
-    title: 'Muralha da Reserva',
+    title: 'Reserva em Formação',
     description: 'Registre pelo menos R$ 1.000,00 em renda fixa.',
     target: 1000,
     metric: 'fixedIncomeAmount',
-    reward: 'Aumenta o domínio da Ordem da Reserva Estável.',
+    reward: 'Aumenta domínio da Ordem da Reserva Estável.',
   },
   {
     id: 'diversificacao-inicial',
-    title: 'Mapa das Três Rotas',
+    title: 'Diversificação Inicial',
     description: 'Registre ativos de pelo menos três categorias.',
     target: 3,
     metric: 'categoryCount',
@@ -473,39 +648,39 @@ export const QUESTS = [
   },
   {
     id: 'poder-250',
-    title: 'Maestria do Portfólio',
+    title: 'Portfólio em Evolução',
     description: 'Alcance 250 de poder somando equipamentos e histórico.',
     target: 250,
     metric: 'power',
-    reward: 'Desbloqueia status de aventureiro avançado.',
+    reward: 'Desbloqueia status de aprendizagem avançada.',
   },
 ];
 
 export const ACHIEVEMENTS = [
   {
     id: 'primeiro-drop',
-    title: 'Primeiro Drop',
-    description: 'Recebeu o primeiro item da jornada.',
+    title: 'Primeiro Item Educativo',
+    description: 'Recebeu o primeiro item de aprendizagem.',
     metric: 'inventoryCount',
     target: 1,
   },
   {
     id: 'quatro-pecas',
-    title: 'Quatro Peças, Uma Ordem',
-    description: 'Equipou quatro itens do mesmo conjunto.',
+    title: 'Quatro Conceitos Conectados',
+    description: 'Equipou quatro itens da mesma trilha.',
     metric: 'largestSet',
     target: 4,
   },
   {
     id: 'cinco-rotas',
-    title: 'Cinco Rotas Financeiras',
+    title: 'Cinco Classes Estudadas',
     description: 'Registrou cinco tipos de investimento diferentes.',
     metric: 'typeCount',
     target: 5,
   },
   {
     id: 'artefato-lendario',
-    title: 'Eco de Artefato',
+    title: 'Artefato de Aprendizagem',
     description: 'Conquistou pelo menos um item de raridade artefato.',
     metric: 'artifactCount',
     target: 1,

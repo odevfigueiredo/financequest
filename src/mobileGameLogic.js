@@ -529,26 +529,26 @@ export function getAdvisorLine({ history = [], summary = getHistorySummary(histo
   const activeBonuses = getActiveSetBonuses(equipment);
 
   if (!history.length) {
-    return 'Registre um aporte para invocar o primeiro drop. Valor maior aumenta a chance de item raro.';
+    return 'Comece registrando um aporte simples. Antes de confirmar, leia objetivo, liquidez e riscos do investimento escolhido.';
   }
 
   if (!inventory.length) {
-    return 'Você já tem registros, mas ainda não recebeu equipamento. Tente um aporte com categoria pré-definida.';
+    return 'Você já tem registros. Continue usando categorias pré-definidas para comparar produtos de forma mais consistente.';
   }
 
   if (summary.fixedIncomeAmount < 1000) {
-    return 'Sua muralha defensiva ainda pode crescer. Tesouro Selic, CDB ou LCI/LCA fortalecem a base.';
+    return 'Sua base de renda fixa ainda pode crescer. Tesouro Selic, CDB ou LCI/LCA ajudam a estudar reserva, crédito e liquidez.';
   }
 
   if (summary.categoryCount < 3) {
-    return 'A carteira já tem força inicial. Explore novas categorias para ganhar drops mais variados.';
+    return 'Você já tem uma base inicial. Explore novas categorias para entender riscos diferentes antes de diversificar de verdade.';
   }
 
   if (!activeBonuses.length) {
-    return 'Equipe peças do mesmo conjunto para ativar bônus de XP e chance de drop.';
+    return 'Use os itens como lembrete de estudo: cada equipamento representa uma decisão validada e um conceito aprendido.';
   }
 
-  return 'A build está ficando forte. Continue equilibrando valor, risco, prazo e equipamento.';
+  return 'Seu histórico está mais completo. Continue equilibrando objetivo, prazo, liquidez, custo e risco.';
 }
 
 export function formatCurrency(value = 0, currency = 'BRL') {
@@ -589,8 +589,8 @@ export function buildCsv(history = []) {
     'xp',
     'poder',
     'multiplicador_xp',
-    'multiplicador_drop',
-    'drops',
+    'multiplicador_itens',
+    'itens',
     'hash',
   ];
   const rows = history.map((entry) => [

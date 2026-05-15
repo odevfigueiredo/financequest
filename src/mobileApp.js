@@ -20,8 +20,10 @@ import {
   CHARACTER_CLASSES,
   CHARACTER_RACES,
   INVESTMENT_CATEGORIES,
+  INVESTMENT_GUIDE,
   INVESTMENT_TYPES,
   ITEM_LIBRARY,
+  SOURCE_REFERENCES,
   SLOT_ORDER,
 } from './gameData.js';
 import {
@@ -51,14 +53,14 @@ import {
   shortHash,
 } from './mobileGameLogic.js';
 
-const STORAGE_KEY = 'finance-quest-state-v3';
+const STORAGE_KEY = 'finance-quest-state-v4';
 const USD_BRL_RATE = 5.1;
 
 const TABS = [
   { key: 'inicio', label: 'Início', icon: 'home-variant' },
-  { key: 'missoes', label: 'Missões', icon: 'flag-checkered' },
+  { key: 'aprender', label: 'Aprender', icon: 'book-open-page-variant' },
   { key: 'validacao', label: 'Validar', icon: 'text-box-check-outline' },
-  { key: 'inventario', label: 'Inventário', icon: 'bag-personal' },
+  { key: 'inventario', label: 'Itens', icon: 'bag-personal' },
   { key: 'perfil', label: 'Perfil', icon: 'account-circle' },
 ];
 
@@ -71,6 +73,19 @@ const RARITY_ORDER = {
   epico: 3,
   lendario: 4,
   artefato: 5,
+};
+
+const SLOT_ICON_MAP = {
+  head: 'shield-crown-outline',
+  shoulders: 'shield-half-full',
+  chest: 'shield-lock-outline',
+  hands: 'hand-coin-outline',
+  neck: 'medal-outline',
+  mainHand: 'chart-line',
+  offHand: 'book-open-page-variant',
+  feet: 'shoe-print',
+  ring1: 'ring',
+  ring2: 'ring',
 };
 
 function loadState() {
@@ -118,11 +133,15 @@ function getTypeConfig(typeKey) {
   return INVESTMENT_TYPES[typeKey] || INVESTMENT_TYPES['tesouro-selic'];
 }
 
+function getInvestmentGuide(typeKey) {
+  return INVESTMENT_GUIDE[typeKey] || INVESTMENT_GUIDE['tesouro-selic'];
+}
+
 function getBestDrop(drops = []) {
   return [...drops].sort((a, b) => (RARITY_ORDER[b.rarity] || 0) - (RARITY_ORDER[a.rarity] || 0))[0] || null;
 }
 
-function ProgressBar({ value, color = '#72E6C7' }) {
+function ProgressBar({ value, color = '#10B981' }) {
   return (
     <View style={styles.progressTrack}>
       <View
@@ -141,10 +160,10 @@ function ProgressBar({ value, color = '#72E6C7' }) {
 function PrimaryButton({ children, icon, onPress, disabled = false, tone = 'emerald', compact = false }) {
   const colors =
     tone === 'amber'
-      ? ['#FFD166', '#F59E0B']
-      : tone === 'rose'
-        ? ['#FF8A9A', '#F43F5E']
-        : ['#72E6C7', '#5AC8FA'];
+      ? ['#F5C64F', '#F59E0B']
+    : tone === 'rose'
+        ? ['#FB7185', '#E11D48']
+        : ['#10B981', '#0F766E'];
 
   return (
     <Pressable
@@ -153,7 +172,7 @@ function PrimaryButton({ children, icon, onPress, disabled = false, tone = 'emer
       style={[styles.buttonWrap, compact && styles.buttonCompact, disabled && styles.disabled]}
     >
       <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primaryButton}>
-        {icon ? <MaterialCommunityIcons name={icon} size={18} color="#07111F" /> : null}
+        {icon ? <MaterialCommunityIcons name={icon} size={18} color="#FFFFFF" /> : null}
         <Text style={styles.primaryButtonText} numberOfLines={1}>
           {children}
         </Text>
@@ -165,7 +184,7 @@ function PrimaryButton({ children, icon, onPress, disabled = false, tone = 'emer
 function GhostButton({ children, icon, onPress, compact = false }) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={[styles.ghostButton, compact && styles.ghostButtonCompact]}>
-      {icon ? <MaterialCommunityIcons name={icon} size={17} color="#D8E7F3" /> : null}
+      {icon ? <MaterialCommunityIcons name={icon} size={17} color="#F8FAFC" /> : null}
       <Text style={styles.ghostButtonText} numberOfLines={1}>
         {children}
       </Text>
@@ -176,8 +195,8 @@ function GhostButton({ children, icon, onPress, compact = false }) {
 function ChoiceChip({ label, icon, selected, onPress, compact = false }) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={[styles.choiceChip, selected && styles.choiceChipActive, compact && styles.choiceChipCompact]}>
-      {icon ? <MaterialCommunityIcons name={icon} size={17} color={selected ? '#07111F' : '#C9D8E5'} /> : null}
-      <Text style={[styles.choiceText, selected && styles.choiceTextActive]} numberOfLines={1}>
+      {icon ? <MaterialCommunityIcons name={icon} size={17} color={selected ? '#FFFFFF' : '#94A3B8'} /> : null}
+      <Text style={[styles.choiceText, selected && styles.choiceTextActive]} numberOfLines={compact ? 1 : 2}>
         {label}
       </Text>
     </Pressable>
@@ -189,6 +208,91 @@ function RarityPill({ rarity }) {
   return (
     <View style={[styles.rarityPill, { borderColor: meta.color, backgroundColor: `${meta.aura}22` }]}>
       <Text style={[styles.rarityText, { color: meta.color }]}>{meta.label}</Text>
+    </View>
+  );
+}
+
+function RiskBadge({ level, tone = 'medium' }) {
+  const color = tone === 'low' ? '#34D399' : tone === 'high' ? '#FB7185' : '#F59E0B';
+
+  return (
+    <View style={[styles.riskBadge, { borderColor: color, backgroundColor: `${color}16` }]}>
+      <Text style={[styles.riskBadgeText, { color }]}>Risco {level}</Text>
+    </View>
+  );
+}
+
+function InfoLine({ icon, label, value }) {
+  return (
+    <View style={styles.infoLine}>
+      <MaterialCommunityIcons name={icon} size={18} color="#34D399" />
+      <View style={styles.infoLineText}>
+        <Text style={styles.infoLineLabel}>{label}</Text>
+        <Text style={styles.infoLineValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
+function BulletList({ items = [] }) {
+  return (
+    <View style={styles.bulletList}>
+      {items.map((item) => (
+        <View key={item} style={styles.bulletRow}>
+          <View style={styles.bulletDot} />
+          <Text style={styles.bulletText}>{item}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function EducationCard({ typeKey, compact = false }) {
+  const type = getTypeConfig(typeKey);
+  const guide = getInvestmentGuide(typeKey);
+
+  return (
+    <View style={[styles.educationCard, compact && styles.educationInline]}>
+      <View style={styles.educationTop}>
+        <View style={styles.educationTitleWrap}>
+          <View style={styles.educationIcon}>
+            <MaterialCommunityIcons name={type.icon} size={22} color="#A7F3D0" />
+          </View>
+          <View style={styles.educationNameWrap}>
+            <Text style={[styles.educationTitle, compact && styles.educationTitleCompact]}>{type.title}</Text>
+            <Text style={[styles.educationCategory, compact && styles.educationCategoryCompact]}>{getCategoryLabel(type.category)}</Text>
+          </View>
+        </View>
+        <RiskBadge level={guide.riskLevel} tone={guide.riskTone} />
+      </View>
+
+      <Text style={[styles.educationSummary, compact && styles.educationSummaryCompact]}>{guide.summary}</Text>
+
+      {!compact ? (
+        <View style={styles.infoGrid}>
+          <InfoLine icon="target" label="Objetivo" value={guide.objective} />
+          <InfoLine icon="clock-outline" label="Liquidez" value={guide.liquidity} />
+          <InfoLine icon="shield-check-outline" label="Garantia" value={guide.guarantee} />
+          <InfoLine icon="receipt-text-outline" label="Custos" value={guide.costs} />
+        </View>
+      ) : (
+        <Text style={styles.compactMetaText}>
+          Objetivo: {guide.objective} Liquidez: {guide.liquidity}
+        </Text>
+      )}
+
+      {!compact ? (
+        <>
+          <Text style={styles.educationSubTitle}>Riscos principais</Text>
+          <BulletList items={guide.risks} />
+          <Text style={styles.educationSubTitle}>Antes de investir, confira</Text>
+          <BulletList items={guide.checklist} />
+        </>
+      ) : (
+        <View style={styles.compactRiskBox}>
+          <Text style={styles.compactRiskText}>{guide.risks[0]}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -205,7 +309,7 @@ function SectionHeader({ eyebrow, title, right }) {
   );
 }
 
-function StatTile({ icon, label, value, color = '#72E6C7' }) {
+function StatTile({ icon, label, value, color = '#0F7B63' }) {
   return (
     <View style={styles.statTile}>
       <MaterialCommunityIcons name={icon} size={19} color={color} />
@@ -220,7 +324,7 @@ function StatTile({ icon, label, value, color = '#72E6C7' }) {
 function TabButton({ tab, active, onPress }) {
   return (
     <Pressable testID={`tab-${tab.key}`} accessibilityRole="button" onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
-      <MaterialCommunityIcons name={tab.icon} size={21} color={active ? '#07111F' : '#C9D8E5'} />
+      <MaterialCommunityIcons name={tab.icon} size={21} color={active ? '#FFFFFF' : '#94A3B8'} />
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]} numberOfLines={1}>
         {tab.label}
       </Text>
@@ -304,17 +408,17 @@ function CreationScreen({ onCreate }) {
   const isValid = name.trim().length >= 3;
 
   return (
-    <LinearGradient colors={['#07111F', '#102236', '#122E3A']} style={styles.creation}>
+    <LinearGradient colors={['#020409', '#070A12', '#0B111C']} style={styles.creation}>
       <StatusBar barStyle="light-content" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.creationContent}>
         <View style={styles.creationHero}>
-          <LinearGradient colors={['#72E6C7', '#5AC8FA']} style={styles.logoCrest}>
-            <MaterialCommunityIcons name="shield-sword" size={38} color="#07111F" />
+          <LinearGradient colors={['#0F7B63', '#3FB7B5']} style={styles.logoCrest}>
+            <MaterialCommunityIcons name="school-outline" size={38} color="#FFFFFF" />
             <Text style={styles.logoText}>FQ</Text>
           </LinearGradient>
           <Text style={styles.appName}>{APP_NAME}</Text>
           <Text style={styles.creationSubtitle}>
-            Crie seu aventureiro financeiro, registre aportes reais e transforme educação financeira em uma jornada de RPG.
+            Crie um perfil, registre aportes e aprenda o objetivo, a liquidez e os riscos de cada investimento.
           </Text>
         </View>
 
@@ -324,12 +428,12 @@ function CreationScreen({ onCreate }) {
             value={name}
             onChangeText={setName}
             placeholder="Nome do usuário"
-            placeholderTextColor="#8FA6BA"
+            placeholderTextColor="#64748B"
             style={styles.input}
             maxLength={24}
           />
 
-          <Text style={styles.inputLabel}>Origem do personagem</Text>
+          <Text style={styles.inputLabel}>Perfil de aprendizagem</Text>
           <View style={styles.optionStack}>
             {CHARACTER_RACES.map((entry) => (
               <Pressable
@@ -337,7 +441,7 @@ function CreationScreen({ onCreate }) {
                 onPress={() => setRace(entry.key)}
                 style={[styles.optionRow, race === entry.key && styles.optionRowActive]}
               >
-                <MaterialCommunityIcons name={entry.key === 'guardiao' ? 'shield' : entry.key === 'arcanista' ? 'chart-timeline-variant' : 'scale-balance'} size={20} color={race === entry.key ? '#07111F' : '#72E6C7'} />
+                <MaterialCommunityIcons name={entry.key === 'guardiao' ? 'shield-check' : entry.key === 'arcanista' ? 'chart-timeline-variant' : 'scale-balance'} size={20} color={race === entry.key ? '#FFFFFF' : '#34D399'} />
                 <View style={styles.optionTextWrap}>
                   <Text style={[styles.optionTitle, race === entry.key && styles.optionTitleActive]}>{entry.label}</Text>
                   <Text style={[styles.optionText, race === entry.key && styles.optionTextActive]}>{entry.bonus}</Text>
@@ -346,7 +450,7 @@ function CreationScreen({ onCreate }) {
             ))}
           </View>
 
-          <Text style={styles.inputLabel}>Classe financeira</Text>
+          <Text style={styles.inputLabel}>Trilha inicial</Text>
           <View style={styles.optionStack}>
             {CHARACTER_CLASSES.map((entry) => (
               <Pressable
@@ -354,7 +458,7 @@ function CreationScreen({ onCreate }) {
                 onPress={() => setClassKey(entry.key)}
                 style={[styles.optionRow, classKey === entry.key && styles.optionRowActive]}
               >
-                <MaterialCommunityIcons name={entry.key === 'renda-fixa' ? 'castle' : entry.key === 'diversificacao' ? 'compass' : 'timer-sand'} size={20} color={classKey === entry.key ? '#07111F' : '#72E6C7'} />
+            <MaterialCommunityIcons name={entry.key === 'renda-fixa' ? 'shield-check' : entry.key === 'diversificacao' ? 'compass' : 'timer-sand'} size={20} color={classKey === entry.key ? '#FFFFFF' : '#34D399'} />
                 <View style={styles.optionTextWrap}>
                   <Text style={[styles.optionTitle, classKey === entry.key && styles.optionTitleActive]}>{entry.label}</Text>
                   <Text style={[styles.optionText, classKey === entry.key && styles.optionTextActive]}>{entry.bonus}</Text>
@@ -363,8 +467,8 @@ function CreationScreen({ onCreate }) {
             ))}
           </View>
 
-          <PrimaryButton icon="sword-cross" disabled={!isValid} onPress={() => onCreate({ name: name.trim(), race, classKey })}>
-            Começar jornada
+          <PrimaryButton icon="check-circle" disabled={!isValid} onPress={() => onCreate({ name: name.trim(), race, classKey })}>
+            Começar trilha
           </PrimaryButton>
         </View>
       </ScrollView>
@@ -380,10 +484,10 @@ function HomeView({ state, summary, power, levelState, multipliers, setTab }) {
 
   return (
     <View style={styles.screenStack}>
-      <LinearGradient colors={['#173B4B', '#143047', '#241F45']} style={styles.heroPanel}>
+      <LinearGradient colors={['#020409', '#07111F', '#063E33']} style={styles.heroPanel}>
         <View style={styles.heroTop}>
           <View>
-            <Text style={styles.eyebrowLight}>Aventureiro financeiro</Text>
+            <Text style={styles.eyebrowLight}>Painel financeiro</Text>
             <Text style={styles.heroTitle}>{state.player.name}</Text>
           </View>
           <View style={styles.levelBadge}>
@@ -401,21 +505,21 @@ function HomeView({ state, summary, power, levelState, multipliers, setTab }) {
           <PrimaryButton icon="auto-fix" compact onPress={() => setTab('validacao')}>
             Validar
           </PrimaryButton>
-          <GhostButton icon="bag-personal" compact onPress={() => setTab('inventario')}>
-            Inventário
+          <GhostButton icon="book-open-page-variant" compact onPress={() => setTab('aprender')}>
+            Aprender
           </GhostButton>
         </View>
       </LinearGradient>
 
       <View style={styles.statsGrid}>
         <StatTile icon="star-four-points" label="Poder Total" value={formatCompact(power.total)} color="#FFD166" />
-        <StatTile icon="cash-multiple" label="Investido" value={formatCurrency(summary.totalAmount)} color="#72E6C7" />
+        <StatTile icon="cash-multiple" label="Investido" value={formatCurrency(summary.totalAmount)} color="#10B981" />
         <StatTile icon="package-variant-closed" label="Itens" value={String(state.inventory.length)} color="#5AC8FA" />
-        <StatTile icon="dice-multiple" label="Drop" value={formatMultiplier(multipliers.itemDropMultiplier)} color="#FF8A9A" />
+        <StatTile icon="dice-multiple" label="Itens" value={formatMultiplier(multipliers.itemDropMultiplier)} color="#FF6B5F" />
       </View>
 
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Build ativa" title="Equipamentos em uso" />
+        <SectionHeader eyebrow="Build financeira" title="Equipamentos ativos" />
         {equippedItems.length ? (
           <View style={styles.itemMiniGrid}>
             {equippedItems.slice(0, 4).map((item) => {
@@ -431,7 +535,7 @@ function HomeView({ state, summary, power, levelState, multipliers, setTab }) {
             })}
           </View>
         ) : (
-          <Text style={styles.emptyText}>Nenhum item equipado. O primeiro aporte já pode gerar uma peça inicial.</Text>
+          <Text style={styles.emptyText}>Nenhum equipamento ativo. Valide um aporte depois de revisar objetivo, liquidez e riscos.</Text>
         )}
         {activeSets.length ? (
           <View style={styles.setList}>
@@ -457,7 +561,7 @@ function HomeView({ state, summary, power, levelState, multipliers, setTab }) {
             <RarityPill rarity={latest.droppedItems?.[0]?.rarity || 'comum'} />
           </View>
         ) : (
-          <Text style={styles.emptyText}>A aba Validar cria registros automáticos com XP, poder e chance de drop.</Text>
+          <Text style={styles.emptyText}>A aba Validar cria registros automáticos com XP, poder e chance de item educativo.</Text>
         )}
       </View>
     </View>
@@ -468,7 +572,7 @@ function MissionCard({ entry }) {
   return (
     <View style={styles.missionCard}>
       <View style={[styles.missionIcon, entry.completed && styles.missionIconDone]}>
-        <MaterialCommunityIcons name={entry.completed ? 'check-bold' : 'progress-clock'} size={18} color={entry.completed ? '#07111F' : '#FFD166'} />
+        <MaterialCommunityIcons name={entry.completed ? 'check-bold' : 'progress-clock'} size={18} color={entry.completed ? '#FFFFFF' : '#F5C64F'} />
       </View>
       <View style={styles.missionBody}>
         <View style={styles.missionTitleRow}>
@@ -479,7 +583,7 @@ function MissionCard({ entry }) {
         </View>
         <Text style={styles.missionText}>{entry.description}</Text>
         {entry.reward ? <Text style={styles.rewardText}>{entry.reward}</Text> : null}
-        <ProgressBar value={entry.progress} color={entry.completed ? '#72E6C7' : '#FFD166'} />
+        <ProgressBar value={entry.progress} color={entry.completed ? '#10B981' : '#F5C64F'} />
       </View>
     </View>
   );
@@ -489,7 +593,7 @@ function MissionsView({ quests, achievements }) {
   return (
     <View style={styles.screenStack}>
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Livro de missões" title="Missões da guilda" />
+        <SectionHeader eyebrow="Plano de estudos" title="Missões educativas" />
         <View style={styles.listStack}>
           {quests.map((quest) => (
             <MissionCard key={quest.id} entry={quest} />
@@ -498,10 +602,69 @@ function MissionsView({ quests, achievements }) {
       </View>
 
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Conquistas" title="Troféus de progresso" />
+        <SectionHeader eyebrow="Conquistas" title="Marcos de progresso" />
         <View style={styles.listStack}>
           {achievements.map((achievement) => (
             <MissionCard key={achievement.id} entry={achievement} />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function LearnView({ selectedType, setSelectedType, quests }) {
+  const typeEntries = Object.entries(INVESTMENT_TYPES).map(([key, config]) => ({ key, ...config }));
+  const selectedGuide = getInvestmentGuide(selectedType);
+
+  return (
+    <View style={styles.screenStack}>
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Educação financeira" title="Aprenda antes de registrar" />
+        <Text style={styles.helperText}>
+          Cada investimento tem objetivo, prazo, custos e riscos. Use este guia para comparar antes de validar um aporte.
+        </Text>
+        <View style={styles.learnTypeGrid}>
+          {typeEntries.map((type) => (
+            <ChoiceChip
+              key={type.key}
+              label={type.title}
+              icon={type.icon}
+              selected={selectedType === type.key}
+              onPress={() => setSelectedType(type.key)}
+            />
+          ))}
+        </View>
+      </View>
+
+      <EducationCard typeKey={selectedType} />
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Resumo" title="O que observar" />
+        <View style={styles.focusGrid}>
+          <InfoLine icon="alert-circle-outline" label="Risco" value={selectedGuide.riskLevel} />
+          <InfoLine icon="target-variant" label="Uso comum" value={selectedGuide.objective} />
+          <InfoLine icon="cash-sync" label="Liquidez" value={selectedGuide.liquidity} />
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Progresso" title="Missões educativas" />
+        <View style={styles.listStack}>
+          {quests.slice(0, 3).map((quest) => (
+            <MissionCard key={quest.id} entry={quest} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <SectionHeader eyebrow="Referências" title="Fontes usadas" />
+        <View style={styles.sourceList}>
+          {SOURCE_REFERENCES.map((source) => (
+            <View key={source.label} style={styles.sourceRow}>
+              <Text style={styles.sourceLabel}>{source.label}</Text>
+              <Text style={styles.sourceFocus}>{source.focus}</Text>
+            </View>
           ))}
         </View>
       </View>
@@ -564,21 +727,24 @@ function ValidationView({
   return (
     <View style={styles.screenStack}>
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Entrada guiada" title="Validação automática" />
+        <SectionHeader eyebrow="Entrada guiada" title="Registro educativo" />
         <Text style={styles.helperText}>
-          Digite a quantia, escolha a categoria e confirme. O comprovante pode ser analisado por OCR assistido quando houver texto disponível.
+          Digite a quantia, escolha uma categoria e revise riscos antes de confirmar. O comprovante pode ser analisado por OCR assistido quando houver texto disponível.
         </Text>
 
         <Text style={styles.inputLabel}>Quantia investida</Text>
         <View style={styles.amountRow}>
-          <TextInput
-            value={amountInput}
-            onChangeText={setAmountInput}
-            placeholder="0,00"
-            placeholderTextColor="#8FA6BA"
-            keyboardType="decimal-pad"
-            style={[styles.input, styles.amountInput]}
-          />
+          <View style={styles.amountField}>
+            <Text style={styles.amountCurrencyPrefix}>{currency === 'USD' ? 'US$' : 'R$'}</Text>
+            <TextInput
+              value={amountInput}
+              onChangeText={setAmountInput}
+              placeholder="0,00"
+              placeholderTextColor="#64748B"
+              keyboardType="decimal-pad"
+              style={styles.amountInput}
+            />
+          </View>
           <View style={styles.currencyGroup}>
             {['BRL', 'USD'].map((entry) => (
               <ChoiceChip key={entry} label={entry} compact selected={currency === entry} onPress={() => setCurrency(entry)} />
@@ -608,10 +774,10 @@ function ValidationView({
               style={[styles.typeOption, selectedType === type.key && styles.typeOptionActive]}
             >
               <View style={styles.typeLeft}>
-                <MaterialCommunityIcons name={type.icon} size={21} color={selectedType === type.key ? '#07111F' : '#72E6C7'} />
+                <MaterialCommunityIcons name={type.icon} size={21} color={selectedType === type.key ? '#FFFFFF' : '#34D399'} />
                 <View style={styles.typeTextWrap}>
                   <Text style={[styles.typeTitle, selectedType === type.key && styles.typeTitleActive]}>{type.title}</Text>
-                  <Text style={[styles.typeLearning, selectedType === type.key && styles.typeLearningActive]} numberOfLines={2}>
+                  <Text style={[styles.typeLearning, selectedType === type.key && styles.typeLearningActive]} numberOfLines={3}>
                     {type.learning}
                   </Text>
                 </View>
@@ -620,15 +786,17 @@ function ValidationView({
             </Pressable>
           ))}
         </View>
+
+        <EducationCard typeKey={selectedType} compact />
       </View>
 
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Validador OCR" title="Leitura assistida" right={<GhostButton compact icon="file-search" onPress={() => setOcrText(OCR_SAMPLE)}>Exemplo</GhostButton>} />
+        <SectionHeader eyebrow="OCR assistido" title="Leitura do comprovante" right={<GhostButton compact icon="file-search" onPress={() => setOcrText(OCR_SAMPLE)}>Exemplo</GhostButton>} />
         <TextInput
           value={ocrText}
           onChangeText={setOcrText}
           placeholder="Cole aqui o texto extraído do comprovante, nota de corretagem ou PDF."
-          placeholderTextColor="#8FA6BA"
+          placeholderTextColor="#64748B"
           multiline
           style={[styles.input, styles.ocrInput]}
         />
@@ -645,7 +813,7 @@ function ValidationView({
         </View>
         {ocrResult ? (
           <View style={styles.ocrResult}>
-            <MaterialCommunityIcons name={ocrResult.confidence >= 0.7 ? 'check-decagram' : 'alert-circle'} size={20} color={ocrResult.confidence >= 0.7 ? '#72E6C7' : '#FFD166'} />
+            <MaterialCommunityIcons name={ocrResult.confidence >= 0.7 ? 'check-decagram' : 'alert-circle'} size={20} color={ocrResult.confidence >= 0.7 ? '#34D399' : '#F5C64F'} />
             <View style={styles.ocrResultText}>
               <Text style={styles.ocrSummary}>{ocrResult.summary}</Text>
               <Text style={styles.ocrMeta}>
@@ -657,12 +825,12 @@ function ValidationView({
       </View>
 
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Recompensas" title="Prévia do drop" />
+        <SectionHeader eyebrow="Recompensas" title="Chance de item educativo" />
         <View style={styles.rewardPreview}>
           <View>
             <Text style={styles.rewardMain}>{selectedConfig.title}</Text>
             <Text style={styles.rewardSub}>
-              {formatCurrency(parsedAmount, currency)} · XP {formatMultiplier(multipliers.xpMultiplier)} · Drop {formatMultiplier(multipliers.itemDropMultiplier)}
+              {formatCurrency(parsedAmount, currency)} · XP {formatMultiplier(multipliers.xpMultiplier)} · Itens {formatMultiplier(multipliers.itemDropMultiplier)}
             </Text>
           </View>
           <MaterialCommunityIcons name={selectedConfig.icon} size={30} color="#FFD166" />
@@ -679,16 +847,24 @@ function ValidationView({
 
 function EquipmentSlot({ slot, item }) {
   const rarity = item ? getRarityMeta(item.rarity) : null;
+  const accent = item ? rarity.color : '#475569';
+  const iconName = item?.icon || SLOT_ICON_MAP[slot.key] || 'rhombus-outline';
 
   return (
-    <View style={[styles.equipmentSlot, item && { borderColor: `${rarity.color}88`, backgroundColor: `${rarity.aura}18` }]}>
-      <View style={styles.slotIcon}>
-        <MaterialCommunityIcons name={item?.icon || 'rhombus-outline'} size={22} color={item ? rarity.color : '#7E93A7'} />
-      </View>
+    <View style={[styles.equipmentSlot, item && { borderColor: `${rarity.color}99`, backgroundColor: `${rarity.aura}16` }]}>
+      <LinearGradient
+        colors={item ? [`${rarity.aura}44`, '#111827'] : ['#111827', '#0B1118']}
+        style={[styles.slotIcon, { borderColor: `${accent}66` }]}
+      >
+        <MaterialCommunityIcons name={iconName} size={23} color={item ? rarity.color : '#64748B'} />
+      </LinearGradient>
       <View style={styles.slotTextWrap}>
         <Text style={styles.slotLabel}>{slot.label}</Text>
-        <Text style={styles.slotItem} numberOfLines={1}>
+        <Text style={styles.slotItem} numberOfLines={item ? 3 : 1}>
           {item?.name || 'Vazio'}
+        </Text>
+        <Text style={[styles.slotRarity, item && { color: rarity.color }]} numberOfLines={2}>
+          {item ? `${rarity.label} · Poder ${item.power}` : slot.description}
         </Text>
       </View>
     </View>
@@ -701,10 +877,11 @@ function ItemCard({ item, equipped, onEquip }) {
   return (
     <View style={[styles.itemCard, { borderColor: `${rarity.color}77` }]}>
       <View style={styles.itemCardTop}>
-        <View style={[styles.itemIcon, { backgroundColor: `${rarity.aura}22` }]}>
+        <LinearGradient colors={[`${rarity.aura}40`, '#111827']} style={[styles.itemIcon, { borderColor: `${rarity.color}55` }]}>
           <MaterialCommunityIcons name={item.icon} size={25} color={rarity.color} />
-        </View>
+        </LinearGradient>
         <View style={styles.itemInfo}>
+          <Text style={[styles.itemSetName, { color: rarity.color }]}>{item.setName}</Text>
           <Text style={styles.itemName}>{item.name}</Text>
           <Text style={styles.itemFlavor}>{item.flavor}</Text>
         </View>
@@ -730,10 +907,10 @@ function InventoryView({ state, multipliers, onEquip }) {
   return (
     <View style={styles.screenStack}>
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Arsenal" title="Inventário e equipamentos" />
+        <SectionHeader eyebrow="Arsenal financeiro" title="Equipamentos da carteira" />
         <View style={styles.buildStats}>
           <StatTile icon="star-four-points" label="XP" value={formatMultiplier(multipliers.xpMultiplier)} color="#FFD166" />
-          <StatTile icon="dice-multiple" label="Drops" value={formatMultiplier(multipliers.itemDropMultiplier)} color="#FF8A9A" />
+          <StatTile icon="dice-multiple" label="Itens" value={formatMultiplier(multipliers.itemDropMultiplier)} color="#FF6B5F" />
         </View>
         <View style={styles.equipmentGrid}>
           {SLOT_ORDER.map((slot) => (
@@ -749,12 +926,12 @@ function InventoryView({ state, multipliers, onEquip }) {
             ))}
           </View>
         ) : (
-          <Text style={styles.emptyText}>Equipe itens do mesmo conjunto para ativar bônus de set.</Text>
+          <Text style={styles.emptyText}>Equipe itens do mesmo conjunto para ativar bônus de ordem, conclave ou círculo.</Text>
         )}
       </View>
 
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Drops coletados" title={`${ownedItems.length} item(ns)`} />
+        <SectionHeader eyebrow="Mochila de investimentos" title={`${ownedItems.length} equipamento(s)`} />
         {ownedItems.length ? (
           <View style={styles.inventoryList}>
             {ownedItems.map((item) => (
@@ -762,7 +939,7 @@ function InventoryView({ state, multipliers, onEquip }) {
             ))}
           </View>
         ) : (
-          <Text style={styles.emptyText}>Valide um aporte para receber o primeiro item. A raridade depende do valor investido e da sua build.</Text>
+          <Text style={styles.emptyText}>Valide um aporte para receber o primeiro item. A raridade depende do valor investido e do conjunto equipado.</Text>
         )}
       </View>
     </View>
@@ -777,10 +954,10 @@ function ProfileView({ state, summary, power, levelState, onExportCsv }) {
   return (
     <View style={styles.screenStack}>
       <View style={styles.panel}>
-        <SectionHeader eyebrow="Ficha" title="Ficha do aventureiro" />
+        <SectionHeader eyebrow="Perfil" title="Perfil financeiro" />
         <View style={styles.profileHeader}>
           <View style={styles.profileAvatar}>
-            <MaterialCommunityIcons name="account-circle" size={50} color="#72E6C7" />
+            <MaterialCommunityIcons name="account-circle" size={50} color="#10B981" />
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{state.player.name}</Text>
@@ -790,7 +967,7 @@ function ProfileView({ state, summary, power, levelState, onExportCsv }) {
         </View>
         <View style={styles.statsGrid}>
           <StatTile icon="star" label="Nível" value={String(levelState.level)} color="#FFD166" />
-          <StatTile icon="chart-areaspline" label="XP" value={formatCompact(levelState.totalXp)} color="#72E6C7" />
+          <StatTile icon="chart-areaspline" label="XP" value={formatCompact(levelState.totalXp)} color="#10B981" />
           <StatTile icon="arm-flex" label="Poder" value={formatCompact(power.total)} color="#5AC8FA" />
           <StatTile icon="cash" label="Aportes" value={String(summary.count)} color="#FF8A9A" />
         </View>
@@ -803,7 +980,7 @@ function ProfileView({ state, summary, power, levelState, onExportCsv }) {
             {recentHistory.map((entry) => (
               <View key={entry.id} style={styles.historyRow}>
                 <View style={styles.historyIcon}>
-                  <MaterialCommunityIcons name={getTypeConfig(entry.typeKey).icon} size={20} color="#72E6C7" />
+                  <MaterialCommunityIcons name={getTypeConfig(entry.typeKey).icon} size={20} color="#34D399" />
                 </View>
                 <View style={styles.historyText}>
                   <Text style={styles.historyTitle}>{entry.typeTitle}</Text>
@@ -827,7 +1004,7 @@ export default function MobileApp() {
   const scrollRef = useRef(null);
   const [state, setState] = useState(loadState);
   const [tab, setTab] = useState('inicio');
-  const [amountInput, setAmountInput] = useState('1.250,00');
+  const [amountInput, setAmountInput] = useState('0,00');
   const [currency, setCurrency] = useState('BRL');
   const [selectedCategory, setSelectedCategory] = useState(INVESTMENT_CATEGORIES[0].key);
   const [selectedType, setSelectedType] = useState(getInvestmentTypesByCategory(INVESTMENT_CATEGORIES[0].key)[0]?.key || 'tesouro-selic');
@@ -971,15 +1148,15 @@ export default function MobileApp() {
     const afterLevel = getLevelState(getHistorySummary(nextState.history).totalXp).level;
     const bestDrop = getBestDrop(roll.drops);
     const subtitle = bestDrop
-      ? `${bestDrop.name} entrou no inventário.`
+      ? `${bestDrop.name} entrou no arsenal.`
       : roll.duplicateCount
-        ? 'Drop repetido virou progresso de coleção.'
+        ? 'Item repetido virou progresso de coleção.'
         : `+${analysis.xpGranted} XP adicionados.`;
 
     showMagic({
       type: afterLevel > beforeLevel ? 'level' : 'drop',
       rarity: bestDrop?.rarity || 'raro',
-      title: afterLevel > beforeLevel ? `Nível ${afterLevel}!` : bestDrop ? 'Drop arcano!' : 'Registro validado',
+      title: afterLevel > beforeLevel ? `Nível ${afterLevel}!` : bestDrop ? 'Equipamento obtido!' : 'Registro validado',
       subtitle,
     });
 
@@ -993,8 +1170,8 @@ export default function MobileApp() {
     showMagic({
       type: 'equip',
       rarity: item?.rarity || 'comum',
-      title: 'Item equipado',
-      subtitle: item ? `${item.name} ajustou seus multiplicadores.` : 'A build foi atualizada.',
+      title: 'Conceito equipado',
+      subtitle: item ? `${item.name} ajustou seus multiplicadores.` : 'A seleção foi atualizada.',
     });
   }
 
@@ -1016,8 +1193,8 @@ export default function MobileApp() {
   }
 
   const content =
-    tab === 'missoes' ? (
-      <MissionsView quests={quests} achievements={achievements} />
+    tab === 'aprender' ? (
+      <LearnView selectedType={selectedType} setSelectedType={setSelectedType} quests={quests} />
     ) : tab === 'validacao' ? (
       <ValidationView
         amountInput={amountInput}
@@ -1046,7 +1223,7 @@ export default function MobileApp() {
     );
 
   return (
-    <LinearGradient colors={['#07111F', '#0E1B2E', '#122E3A']} style={styles.appRoot}>
+    <LinearGradient colors={['#020409', '#070A12', '#0B111C']} style={styles.appRoot}>
       <StatusBar barStyle="light-content" />
       <View style={[styles.mobileShell, width >= 520 && styles.mobileShellWide]}>
         <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -1105,22 +1282,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#D6FFF5',
+    borderColor: '#FFFFFF',
     gap: 2,
   },
   logoText: {
-    color: '#07111F',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '900',
   },
   appName: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 34,
     fontWeight: '900',
     textAlign: 'center',
   },
   creationSubtitle: {
-    color: '#B9CBDA',
+    color: '#94A3B8',
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
@@ -1130,7 +1307,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: '#2C5366',
+    borderColor: '#1F2937',
     overflow: 'hidden',
   },
   heroTop: {
@@ -1173,7 +1350,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   levelNumber: {
-    color: '#07111F',
+    color: '#102E29',
     fontSize: 28,
     fontWeight: '900',
   },
@@ -1194,9 +1371,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   panel: {
-    backgroundColor: 'rgba(12, 25, 42, 0.94)',
+    backgroundColor: '#0B1118',
     borderWidth: 1,
-    borderColor: '#243E53',
+    borderColor: '#1F2937',
     borderRadius: 18,
     padding: 14,
     gap: 12,
@@ -1211,19 +1388,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eyebrow: {
-    color: '#72E6C7',
+    color: '#34D399',
     fontSize: 11,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   sectionTitle: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 19,
     fontWeight: '900',
     marginTop: 2,
   },
   helperText: {
-    color: '#B9CBDA',
+    color: '#94A3B8',
     fontSize: 13,
     lineHeight: 19,
   },
@@ -1238,24 +1415,24 @@ const styles = StyleSheet.create({
     minHeight: 84,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#243E53',
-    backgroundColor: '#0A1726',
+    borderColor: '#1F2937',
+    backgroundColor: '#111827',
     padding: 12,
     justifyContent: 'space-between',
   },
   statLabel: {
-    color: '#91A9BC',
+    color: '#94A3B8',
     fontSize: 12,
     fontWeight: '700',
   },
   statValue: {
-    color: '#FFFFFF',
+    color: '#F8FAFC',
     fontSize: 20,
     fontWeight: '900',
   },
   progressTrack: {
     height: 9,
-    backgroundColor: '#102236',
+    backgroundColor: '#172033',
     borderRadius: 99,
     overflow: 'hidden',
   },
@@ -1264,7 +1441,7 @@ const styles = StyleSheet.create({
     borderRadius: 99,
   },
   inputLabel: {
-    color: '#D8E7F3',
+    color: '#F8FAFC',
     fontSize: 13,
     fontWeight: '800',
     marginTop: 4,
@@ -1273,9 +1450,9 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2B4C62',
-    backgroundColor: '#071525',
-    color: '#F6FBFF',
+    borderColor: '#263241',
+    backgroundColor: '#090E15',
+    color: '#F8FAFC',
     paddingHorizontal: 13,
     paddingVertical: 10,
     fontSize: 15,
@@ -1283,9 +1460,28 @@ const styles = StyleSheet.create({
   amountRow: {
     gap: 10,
   },
-  amountInput: {
+  amountField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#263241',
+    backgroundColor: '#090E15',
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
+  amountCurrencyPrefix: {
+    color: '#34D399',
     fontSize: 22,
     fontWeight: '900',
+  },
+  amountInput: {
+    flex: 1,
+    color: '#F8FAFC',
+    fontSize: 22,
+    fontWeight: '900',
+    padding: 0,
   },
   currencyGroup: {
     flexDirection: 'row',
@@ -1300,33 +1496,33 @@ const styles = StyleSheet.create({
     gap: 10,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 12,
   },
   optionRowActive: {
-    backgroundColor: '#72E6C7',
-    borderColor: '#B7FFF0',
+    backgroundColor: '#0F766E',
+    borderColor: '#34D399',
   },
   optionTextWrap: {
     flex: 1,
     gap: 3,
   },
   optionTitle: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 14,
     fontWeight: '900',
   },
   optionTitleActive: {
-    color: '#07111F',
+    color: '#FFFFFF',
   },
   optionText: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 12,
     lineHeight: 17,
   },
   optionTextActive: {
-    color: '#173047',
+    color: '#D1FAE5',
   },
   buttonWrap: {
     borderRadius: 14,
@@ -1346,7 +1542,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: {
-    color: '#07111F',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -1357,8 +1553,8 @@ const styles = StyleSheet.create({
     minHeight: 46,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2B4C62',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     paddingHorizontal: 13,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1370,7 +1566,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   ghostButtonText: {
-    color: '#D8E7F3',
+    color: '#F8FAFC',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1378,8 +1574,8 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: '#2B4C62',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     paddingHorizontal: 11,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1393,16 +1589,18 @@ const styles = StyleSheet.create({
     flexBasis: 0,
   },
   choiceChipActive: {
-    backgroundColor: '#72E6C7',
-    borderColor: '#B7FFF0',
+    backgroundColor: '#0F766E',
+    borderColor: '#34D399',
   },
   choiceText: {
-    color: '#C9D8E5',
+    color: '#94A3B8',
     fontSize: 13,
+    lineHeight: 16,
     fontWeight: '800',
+    textAlign: 'center',
   },
   choiceTextActive: {
-    color: '#07111F',
+    color: '#FFFFFF',
   },
   chipGrid: {
     flexDirection: 'row',
@@ -1415,14 +1613,14 @@ const styles = StyleSheet.create({
   typeOption: {
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 11,
     gap: 8,
   },
   typeOptionActive: {
-    backgroundColor: '#72E6C7',
-    borderColor: '#B7FFF0',
+    backgroundColor: '#0F766E',
+    borderColor: '#34D399',
   },
   typeLeft: {
     flexDirection: 'row',
@@ -1434,20 +1632,20 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   typeTitle: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 14,
     fontWeight: '900',
   },
   typeTitleActive: {
-    color: '#07111F',
+    color: '#FFFFFF',
   },
   typeLearning: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 12,
     lineHeight: 17,
   },
   typeLearningActive: {
-    color: '#173047',
+    color: '#D1FAE5',
   },
   typeXp: {
     color: '#FFD166',
@@ -1456,7 +1654,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   typeXpActive: {
-    color: '#07111F',
+    color: '#FFFFFF',
   },
   ocrInput: {
     minHeight: 104,
@@ -1473,8 +1671,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 11,
   },
   ocrResultText: {
@@ -1482,13 +1680,13 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   ocrSummary: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 13,
     fontWeight: '800',
     lineHeight: 18,
   },
   ocrMeta: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 12,
   },
   rewardPreview: {
@@ -1498,17 +1696,17 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 12,
   },
   rewardMain: {
-    color: '#FFFFFF',
+    color: '#F8FAFC',
     fontSize: 16,
     fontWeight: '900',
   },
   rewardSub: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 12,
     marginTop: 3,
   },
@@ -1532,7 +1730,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   dropLabel: {
-    color: '#D8E7F3',
+    color: '#CBD5E1',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1541,7 +1739,7 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 99,
     overflow: 'hidden',
-    backgroundColor: '#102236',
+    backgroundColor: '#172033',
   },
   dropFill: {
     height: '100%',
@@ -1549,7 +1747,7 @@ const styles = StyleSheet.create({
   },
   dropChance: {
     width: 38,
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 12,
     textAlign: 'right',
     fontWeight: '900',
@@ -1571,12 +1769,12 @@ const styles = StyleSheet.create({
     minHeight: 76,
     borderRadius: 14,
     borderWidth: 1,
-    backgroundColor: '#091827',
+    backgroundColor: '#111827',
     padding: 10,
     gap: 8,
   },
   itemMiniName: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 16,
@@ -1584,8 +1782,8 @@ const styles = StyleSheet.create({
   latestBox: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1593,17 +1791,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   latestValue: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 19,
     fontWeight: '900',
   },
   latestMeta: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 12,
     marginTop: 2,
   },
   emptyText: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 13,
     lineHeight: 19,
   },
@@ -1612,20 +1810,20 @@ const styles = StyleSheet.create({
     gap: 10,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 12,
   },
   missionIcon: {
     width: 34,
     height: 34,
     borderRadius: 12,
-    backgroundColor: '#172A3F',
+    backgroundColor: '#172033',
     alignItems: 'center',
     justifyContent: 'center',
   },
   missionIconDone: {
-    backgroundColor: '#72E6C7',
+    backgroundColor: '#0F766E',
   },
   missionBody: {
     flex: 1,
@@ -1638,22 +1836,22 @@ const styles = StyleSheet.create({
   },
   missionTitle: {
     flex: 1,
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 14,
     fontWeight: '900',
   },
   missionCount: {
-    color: '#FFD166',
+    color: '#B7791F',
     fontSize: 12,
     fontWeight: '900',
   },
   missionText: {
-    color: '#AFC2D2',
+    color: '#94A3B8',
     fontSize: 12,
     lineHeight: 17,
   },
   rewardText: {
-    color: '#72E6C7',
+    color: '#34D399',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1672,6 +1870,185 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
   },
+  riskBadge: {
+    borderRadius: 99,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+  },
+  riskBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  infoLine: {
+    flexDirection: 'row',
+    gap: 9,
+    alignItems: 'flex-start',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+    paddingVertical: 9,
+  },
+  infoLineText: {
+    flex: 1,
+    gap: 2,
+  },
+  infoLineLabel: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  infoLineValue: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  bulletList: {
+    gap: 8,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  bulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#34D399',
+    marginTop: 6,
+  },
+  bulletText: {
+    flex: 1,
+    color: '#CBD5E1',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  educationCard: {
+    backgroundColor: '#0B1118',
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+  },
+  educationInline: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderTopWidth: 1,
+    borderTopColor: '#1F2937',
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingBottom: 0,
+  },
+  educationTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  educationTitleWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  educationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: '#063E33',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  educationNameWrap: {
+    flex: 1,
+  },
+  educationTitle: {
+    color: '#F8FAFC',
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: '900',
+  },
+  educationTitleCompact: {
+    color: '#F8FAFC',
+  },
+  educationCategory: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  educationCategoryCompact: {
+    color: '#94A3B8',
+  },
+  educationSummary: {
+    color: '#CBD5E1',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  educationSummaryCompact: {
+    color: '#CBD5E1',
+  },
+  infoGrid: {
+    gap: 8,
+  },
+  educationSubTitle: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  compactRiskBox: {
+    borderRadius: 12,
+    backgroundColor: '#2A1F06',
+    borderWidth: 1,
+    borderColor: '#A16207',
+    padding: 10,
+  },
+  compactRiskText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  compactMetaText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  learnTypeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  focusGrid: {
+    gap: 8,
+  },
+  sourceList: {
+    gap: 10,
+  },
+  sourceRow: {
+    borderRadius: 12,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#263241',
+    padding: 10,
+    gap: 3,
+  },
+  sourceLabel: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  sourceFocus: {
+    color: '#94A3B8',
+    fontSize: 12,
+    lineHeight: 17,
+  },
   buildStats: {
     flexDirection: 'row',
     gap: 10,
@@ -1684,21 +2061,21 @@ const styles = StyleSheet.create({
   equipmentSlot: {
     flexGrow: 1,
     flexBasis: '46%',
-    minHeight: 72,
+    minHeight: 112,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#28465B',
-    backgroundColor: '#091827',
+    borderColor: '#263241',
+    backgroundColor: '#111827',
     padding: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
   },
   slotIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    backgroundColor: '#102236',
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1706,22 +2083,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   slotLabel: {
-    color: '#91A9BC',
+    color: '#94A3B8',
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
   },
   slotItem: {
-    color: '#F6FBFF',
-    fontSize: 12,
+    color: '#F8FAFC',
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '900',
     marginTop: 3,
+  },
+  slotRarity: {
+    color: '#7E93A7',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    marginTop: 4,
   },
   setList: {
     gap: 5,
   },
   setLine: {
-    color: '#72E6C7',
+    color: '#34D399',
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '800',
@@ -1732,7 +2118,7 @@ const styles = StyleSheet.create({
   itemCard: {
     borderRadius: 16,
     borderWidth: 1,
-    backgroundColor: '#091827',
+    backgroundColor: '#111827',
     padding: 12,
     gap: 10,
   },
@@ -1741,9 +2127,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   itemIcon: {
-    width: 42,
-    height: 42,
+    width: 50,
+    height: 50,
     borderRadius: 14,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1752,13 +2139,19 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   itemName: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 15,
     lineHeight: 19,
     fontWeight: '900',
   },
+  itemSetName: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
   itemFlavor: {
-    color: '#AFC2D2',
+    color: '#CBD5E1',
     fontSize: 12,
     lineHeight: 17,
   },
@@ -1769,12 +2162,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   itemPower: {
-    color: '#D8E7F3',
+    color: '#F8FAFC',
     fontSize: 12,
     fontWeight: '800',
   },
   itemLore: {
-    color: '#91A9BC',
+    color: '#94A3B8',
     fontSize: 12,
     lineHeight: 17,
   },
@@ -1787,9 +2180,9 @@ const styles = StyleSheet.create({
     width: 66,
     height: 66,
     borderRadius: 22,
-    backgroundColor: '#091827',
+    backgroundColor: '#111827',
     borderWidth: 1,
-    borderColor: '#28465B',
+    borderColor: '#263241',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1798,12 +2191,12 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   profileName: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 21,
     fontWeight: '900',
   },
   profileLine: {
-    color: '#AFC2D2',
+    color: '#94A3B8',
     fontSize: 13,
   },
   historyList: {
@@ -1814,16 +2207,16 @@ const styles = StyleSheet.create({
     gap: 10,
     alignItems: 'center',
     borderRadius: 14,
-    backgroundColor: '#091827',
+    backgroundColor: '#111827',
     borderWidth: 1,
-    borderColor: '#28465B',
+    borderColor: '#263241',
     padding: 11,
   },
   historyIcon: {
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: '#102236',
+    backgroundColor: '#172033',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1831,12 +2224,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   historyTitle: {
-    color: '#F6FBFF',
+    color: '#F8FAFC',
     fontSize: 14,
     fontWeight: '900',
   },
   historyMeta: {
-    color: '#9EB4C5',
+    color: '#94A3B8',
     fontSize: 12,
     marginTop: 3,
   },
@@ -1848,8 +2241,8 @@ const styles = StyleSheet.create({
     minHeight: 68,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#294A61',
-    backgroundColor: 'rgba(7, 17, 31, 0.96)',
+    borderColor: '#263241',
+    backgroundColor: 'rgba(11, 17, 24, 0.96)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1865,15 +2258,15 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   tabButtonActive: {
-    backgroundColor: '#72E6C7',
+    backgroundColor: '#0F766E',
   },
   tabLabel: {
-    color: '#C9D8E5',
+    color: '#94A3B8',
     fontSize: 10,
     fontWeight: '800',
   },
   tabLabelActive: {
-    color: '#07111F',
+    color: '#FFFFFF',
   },
   magicOverlay: {
     position: 'absolute',
@@ -1883,7 +2276,7 @@ const styles = StyleSheet.create({
     left: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(3, 8, 18, 0.28)',
+    backgroundColor: 'rgba(0, 0, 0, 0.54)',
     paddingHorizontal: 26,
   },
   magicCard: {
@@ -1892,7 +2285,7 @@ const styles = StyleSheet.create({
     minHeight: 220,
     borderRadius: 28,
     borderWidth: 2,
-    backgroundColor: '#081322',
+    backgroundColor: '#0B1118',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 22,
@@ -1916,13 +2309,13 @@ const styles = StyleSheet.create({
     borderRadius: 99,
   },
   magicTitle: {
-    color: '#FFFFFF',
+    color: '#F8FAFC',
     fontSize: 26,
     fontWeight: '900',
     textAlign: 'center',
   },
   magicSubtitle: {
-    color: '#C9D8E5',
+    color: '#CBD5E1',
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
