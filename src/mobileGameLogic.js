@@ -3,6 +3,7 @@ import {
   DEFAULT_GAME_STATE,
   EMPTY_EQUIPMENT,
   INVESTMENT_CATEGORIES,
+  INVESTMENT_GUIDE,
   INVESTMENT_TYPES,
   ITEM_LIBRARY,
   QUESTS,
@@ -458,6 +459,185 @@ export function getHistorySummary(history = []) {
     }, 0),
     byType,
     byCategory,
+  };
+}
+
+const RISK_BUCKETS = {
+  low: { key: 'low', label: 'Baixo', weight: 1 },
+  medium: { key: 'medium', label: 'Médio', weight: 2 },
+  high: { key: 'high', label: 'Alto', weight: 3 },
+};
+
+function toMonthKey(date) {
+  const safeDate = date instanceof Date && Number.isFinite(date.valueOf()) ? date : new Date();
+  return `${safeDate.getFullYear()}-${String(safeDate.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function toShortDateLabel(date) {
+  const safeDate = date instanceof Date && Number.isFinite(date.valueOf()) ? date : new Date();
+  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(safeDate);
+}
+
+function toMonthLabel(monthKey) {
+  const [year, month] = String(monthKey).split('-').map(Number);
+  const date = new Date(year || 2026, (month || 1) - 1, 1);
+  return new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(date).replace('.', '');
+}
+
+function percentOf(value, total) {
+  return total > 0 ? Number(value || 0) / total : 0;
+}
+
+function sortedEntriesFromMap(source, totalAmount, mapper) {
+  return Object.entries(source)
+    .map(([key, value]) => mapper(key, value, percentOf(value.amount, totalAmount)))
+    .filter((entry) => entry.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+}
+
+export function buildPortfolioAnalytics(history = []) {
+  const orderedHistory = [...(Array.isArray(history) ? history : [])]
+    .filter((entry) => Number(entry?.amount || 0) > 0)
+    .map((entry, index) => ({
+      ...entry,
+      amount: Number(entry.amount || 0),
+      xpGranted: Number(entry.xpGranted || 0),
+      date: new Date(entry.createdAt || Date.now() + index),
+    }))
+    .sort((a, b) => a.date - b.date);
+
+  const totalAmount = orderedHistory.reduce((total, entry) => total + entry.amount, 0);
+  const totalXp = orderedHistory.reduce((total, entry) => total + entry.xpGranted, 0);
+  const byCategory = {};
+  const byType = {};
+  const byRisk = {};
+  const byMonth = {};
+  const timeline = [];
+  let cumulativeAmount = 0;
+  let cumulativeXp = 0;
+
+  INVESTMENT_CATEGORIES.forEach((category) => {
+    byCategory[category.key] = { amount: 0, count: 0 };
+  });
+  Object.keys(RISK_BUCKETS).forEach((riskKey) => {
+    byRisk[riskKey] = { amount: 0, count: 0 };
+  });
+
+  orderedHistory.forEach((entry) => {
+    const typeConfig = INVESTMENT_TYPES[entry.typeKey] || INVESTMENT_TYPES['tesouro-selic'];
+    const categoryKey = entry.category || typeConfig.category;
+    const guide = INVESTMENT_GUIDE[entry.typeKey] || INVESTMENT_GUIDE['tesouro-selic'];
+    const riskKey = guide.riskTone || 'medium';
+    const monthKey = toMonthKey(entry.date);
+
+    byCategory[categoryKey] = byCategory[categoryKey] || { amount: 0, count: 0 };
+    byCategory[categoryKey].amount += entry.amount;
+    byCategory[categoryKey].count += 1;
+
+    byType[entry.typeKey] = byType[entry.typeKey] || { amount: 0, count: 0 };
+    byType[entry.typeKey].amount += entry.amount;
+    byType[entry.typeKey].count += 1;
+
+    byRisk[riskKey] = byRisk[riskKey] || { amount: 0, count: 0 };
+    byRisk[riskKey].amount += entry.amount;
+    byRisk[riskKey].count += 1;
+
+    byMonth[monthKey] = byMonth[monthKey] || { amount: 0, count: 0 };
+    byMonth[monthKey].amount += entry.amount;
+    byMonth[monthKey].count += 1;
+
+    cumulativeAmount += entry.amount;
+    cumulativeXp += entry.xpGranted;
+    timeline.push({
+      id: entry.id || `${entry.typeKey}-${entry.createdAt}-${timeline.length}`,
+      label: toShortDateLabel(entry.date),
+      amount: entry.amount,
+      cumulativeAmount,
+      cumulativeXp,
+      typeTitle: entry.typeTitle || typeConfig.title,
+    });
+  });
+
+  const categories = sortedEntriesFromMap(byCategory, totalAmount, (key, value, percentage) => {
+    const config = INVESTMENT_CATEGORIES.find((category) => category.key === key) || { key, label: 'Categoria', icon: 'chart-donut' };
+    return { key, label: config.label, icon: config.icon, amount: value.amount, count: value.count, percentage };
+  });
+
+  const types = sortedEntriesFromMap(byType, totalAmount, (key, value, percentage) => {
+    const config = INVESTMENT_TYPES[key] || INVESTMENT_TYPES['tesouro-selic'];
+    const guide = INVESTMENT_GUIDE[key] || INVESTMENT_GUIDE['tesouro-selic'];
+    return {
+      key,
+      label: config.title,
+      icon: config.icon,
+      category: config.category,
+      riskTone: guide.riskTone || 'medium',
+      amount: value.amount,
+      count: value.count,
+      percentage,
+    };
+  });
+
+  const risk = Object.values(RISK_BUCKETS).map((bucket) => {
+    const value = byRisk[bucket.key] || { amount: 0, count: 0 };
+    return {
+      ...bucket,
+      amount: value.amount,
+      count: value.count,
+      percentage: percentOf(value.amount, totalAmount),
+    };
+  });
+
+  const monthly = Object.entries(byMonth)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([monthKey, value]) => ({
+      key: monthKey,
+      label: toMonthLabel(monthKey),
+      amount: value.amount,
+      count: value.count,
+      percentage: percentOf(value.amount, Math.max(...Object.values(byMonth).map((entry) => entry.amount), 1)),
+    }));
+
+  const largestType = types[0] || null;
+  const largestCategory = categories[0] || null;
+  const highRisk = risk.find((entry) => entry.key === 'high')?.percentage || 0;
+  const weightedRisk = risk.reduce((score, entry) => score + entry.percentage * entry.weight, 0);
+  const riskScore = totalAmount > 0 ? Math.round(((weightedRisk - 1) / 2) * 100) : 0;
+  const diversificationScore = totalAmount
+    ? Math.round(
+        Math.min(100, categories.length * 14 + types.length * 8 + (1 - (largestType?.percentage || 0)) * 34),
+      )
+    : 0;
+  const concentrationScore = totalAmount ? Math.round((largestType?.percentage || 0) * 100) : 0;
+
+  let insight = 'Registre aportes para visualizar evolução, alocação e risco da carteira.';
+  if (totalAmount > 0 && categories.length < 2) {
+    insight = 'A carteira ainda está concentrada em uma classe. Compare outras classes antes de aumentar o risco.';
+  } else if (concentrationScore >= 70) {
+    insight = 'Um produto domina a carteira. Acompanhe concentração para evitar depender de um único tipo de ativo.';
+  } else if (highRisk >= 0.45) {
+    insight = 'A parcela de risco alto está relevante. Revise horizonte, liquidez e objetivo antes de novos aportes.';
+  } else if (diversificationScore >= 70) {
+    insight = 'A carteira já mostra boa variedade educativa. Continue acompanhando custos, liquidez e risco por produto.';
+  } else if (totalAmount > 0) {
+    insight = 'Há uma base inicial. O próximo passo é registrar classes diferentes para melhorar a leitura da carteira.';
+  }
+
+  return {
+    totalAmount,
+    totalXp,
+    count: orderedHistory.length,
+    categories,
+    types,
+    risk,
+    monthly,
+    timeline,
+    concentrationScore,
+    diversificationScore,
+    riskScore,
+    largestType,
+    largestCategory,
+    insight,
   };
 }
 

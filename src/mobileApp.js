@@ -31,6 +31,7 @@ import {
   analyzeInvestmentPayload,
   analyzeOcrText,
   autoEquipBestDrops,
+  buildPortfolioAnalytics,
   buildCsv,
   calculateDropChances,
   calculateProfilePower,
@@ -73,6 +74,20 @@ const RARITY_ORDER = {
   epico: 3,
   lendario: 4,
   artefato: 5,
+};
+
+const CHART_COLORS = ['#34D399', '#5AC8FA', '#FFD166', '#FF8A9A', '#A78BFA', '#F97316'];
+const CATEGORY_COLORS = {
+  'renda-fixa': '#34D399',
+  'renda-variavel': '#FB7185',
+  fundos: '#5AC8FA',
+  global: '#A78BFA',
+  'longo-prazo': '#FFD166',
+};
+const RISK_COLORS = {
+  low: '#34D399',
+  medium: '#F5C64F',
+  high: '#FB7185',
 };
 
 const SLOT_ICON_MAP = {
@@ -192,9 +207,9 @@ function GhostButton({ children, icon, onPress, compact = false }) {
   );
 }
 
-function ChoiceChip({ label, icon, selected, onPress, compact = false }) {
+function ChoiceChip({ label, icon, selected, onPress, compact = false, testID }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.choiceChip, selected && styles.choiceChipActive, compact && styles.choiceChipCompact]}>
+    <Pressable testID={testID} accessibilityRole="button" onPress={onPress} style={[styles.choiceChip, selected && styles.choiceChipActive, compact && styles.choiceChipCompact]}>
       {icon ? <MaterialCommunityIcons name={icon} size={17} color={selected ? '#FFFFFF' : '#94A3B8'} /> : null}
       <Text style={[styles.choiceText, selected && styles.choiceTextActive]} numberOfLines={compact ? 1 : 2}>
         {label}
@@ -761,6 +776,7 @@ function ValidationView({
               icon={category.icon}
               selected={selectedCategory === category.key}
               onPress={() => setSelectedCategory(category.key)}
+              testID={`category-${category.key}`}
             />
           ))}
         </View>
@@ -770,6 +786,7 @@ function ValidationView({
           {types.map((type) => (
             <Pressable
               key={type.key}
+              testID={`type-${type.key}`}
               onPress={() => setSelectedType(type.key)}
               style={[styles.typeOption, selectedType === type.key && styles.typeOptionActive]}
             >
@@ -946,6 +963,291 @@ function InventoryView({ state, multipliers, onEquip }) {
   );
 }
 
+function getChartColor(key, index = 0) {
+  return CATEGORY_COLORS[key] || CHART_COLORS[index % CHART_COLORS.length];
+}
+
+function ChartModeButton({ label, active, onPress, testID }) {
+  return (
+    <Pressable testID={testID} accessibilityRole="button" onPress={onPress} style={[styles.chartModeButton, active && styles.chartModeButtonActive]}>
+      <Text style={[styles.chartModeText, active && styles.chartModeTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ChartMetric({ label, value, color }) {
+  return (
+    <View style={styles.chartMetric}>
+      <View style={[styles.chartMetricDot, { backgroundColor: color }]} />
+      <Text style={styles.chartMetricLabel}>{label}</Text>
+      <Text style={styles.chartMetricValue} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function EmptyChartState() {
+  return (
+    <View style={styles.emptyChart}>
+      <MaterialCommunityIcons name="chart-timeline-variant" size={28} color="#64748B" />
+      <Text style={styles.emptyText}>Registre aportes para liberar gráficos da carteira.</Text>
+    </View>
+  );
+}
+
+function EvolutionChart({ timeline }) {
+  if (!timeline.length) {
+    return <EmptyChartState />;
+  }
+
+  const points = timeline.slice(-7);
+  const maxValue = Math.max(...points.map((point) => point.cumulativeAmount), 1);
+
+  return (
+    <View style={styles.evolutionChart}>
+      <View style={styles.evolutionGrid}>
+        {[0, 1, 2].map((line) => (
+          <View key={line} style={styles.evolutionGridLine} />
+        ))}
+      </View>
+      <View style={styles.evolutionBars}>
+        {points.map((point, index) => {
+          const height = Math.max(8, Math.round((point.cumulativeAmount / maxValue) * 100));
+          const color = CHART_COLORS[index % CHART_COLORS.length];
+          return (
+            <View key={point.id} style={styles.evolutionColumn}>
+              <View style={styles.evolutionTrack}>
+                <View style={[styles.evolutionBar, { height: `${height}%`, backgroundColor: color }]} />
+                <View style={[styles.evolutionDot, { borderColor: color }]} />
+              </View>
+              <Text style={styles.evolutionLabel}>{point.label}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function SegmentedAllocation({ entries }) {
+  if (!entries.length) {
+    return <EmptyChartState />;
+  }
+
+  return (
+    <View style={styles.allocationStack}>
+      <View style={styles.segmentedTrack}>
+        {entries.map((entry, index) => (
+          <View
+            key={entry.key}
+            style={[
+              styles.segmentedPart,
+              {
+                flex: Math.max(0.04, entry.percentage),
+                backgroundColor: getChartColor(entry.key, index),
+              },
+            ]}
+          />
+        ))}
+      </View>
+      <View style={styles.legendList}>
+        {entries.map((entry, index) => {
+          const color = getChartColor(entry.key, index);
+          return (
+            <View key={entry.key} style={styles.legendRow}>
+              <View style={[styles.legendDot, { backgroundColor: color }]} />
+              <Text style={styles.legendLabel}>{entry.label}</Text>
+              <Text style={styles.legendValue}>{formatPercent(entry.percentage)}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function TypeBars({ types }) {
+  if (!types.length) {
+    return null;
+  }
+
+  const maxAmount = Math.max(...types.map((entry) => entry.amount), 1);
+
+  return (
+    <View style={styles.typeBars}>
+      {types.slice(0, 5).map((entry, index) => {
+        const color = getChartColor(entry.category, index);
+        const width = Math.max(8, Math.round((entry.amount / maxAmount) * 100));
+        return (
+          <View key={entry.key} style={styles.typeBarRow}>
+            <View style={styles.typeBarHeader}>
+              <View style={styles.typeBarTitle}>
+                <MaterialCommunityIcons name={entry.icon} size={15} color={color} />
+                <Text style={styles.typeBarLabel}>{entry.label}</Text>
+              </View>
+              <Text style={styles.typeBarValue}>{formatCurrency(entry.amount)}</Text>
+            </View>
+            <View style={styles.typeBarTrack}>
+              <View style={[styles.typeBarFill, { width: `${width}%`, backgroundColor: color }]} />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function RiskBars({ risk }) {
+  return (
+    <View style={styles.typeBars}>
+      {risk.map((entry) => {
+        const color = RISK_COLORS[entry.key] || '#F5C64F';
+        return (
+          <View key={entry.key} style={styles.typeBarRow}>
+            <View style={styles.typeBarHeader}>
+              <Text style={styles.typeBarLabel}>Risco {entry.label}</Text>
+              <Text style={styles.typeBarValue}>{formatCurrency(entry.amount)}</Text>
+            </View>
+            <View style={styles.typeBarTrack}>
+              <View style={[styles.typeBarFill, { width: `${Math.max(4, Math.round(entry.percentage * 100))}%`, backgroundColor: color }]} />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function RiskMap({ types }) {
+  if (!types.length) {
+    return <EmptyChartState />;
+  }
+
+  const riskX = { low: 16, medium: 50, high: 84 };
+
+  return (
+    <View style={styles.riskMap}>
+      <View style={styles.riskMapAxisVertical} />
+      <View style={styles.riskMapAxisHorizontal} />
+      <Text style={[styles.riskMapLabel, styles.riskMapLabelTop]}>Maior peso</Text>
+      <Text style={[styles.riskMapLabel, styles.riskMapLabelLeft]}>Baixo risco</Text>
+      <Text style={[styles.riskMapLabel, styles.riskMapLabelRight]}>Alto risco</Text>
+      {types.slice(0, 6).map((entry, index) => {
+        const color = getChartColor(entry.category, index);
+        const size = Math.min(32, Math.max(16, 16 + entry.percentage * 34));
+        const bottom = Math.min(82, Math.max(16, 18 + entry.percentage * 125));
+        return (
+          <View
+            key={entry.key}
+            style={[
+              styles.riskBubble,
+              {
+                left: `${riskX[entry.riskTone] || 50}%`,
+                bottom: `${bottom}%`,
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                backgroundColor: `${color}DD`,
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+function ScoreRow({ label, value, color }) {
+  return (
+    <View style={styles.scoreRow}>
+      <View style={styles.scoreTop}>
+        <Text style={styles.scoreLabel}>{label}</Text>
+        <Text style={styles.scoreValue}>{value}%</Text>
+      </View>
+      <ProgressBar value={value / 100} color={color} />
+    </View>
+  );
+}
+
+function PortfolioCharts({ history, summary }) {
+  const [mode, setMode] = useState('overview');
+  const analytics = useMemo(() => buildPortfolioAnalytics(history), [history]);
+  const modes = [
+    { key: 'overview', label: 'Visão' },
+    { key: 'allocation', label: 'Alocação' },
+    { key: 'risk', label: 'Risco' },
+  ];
+
+  return (
+    <View style={styles.panel}>
+      <SectionHeader eyebrow="Carteira" title="Análise visual" />
+      <Text style={styles.helperText}>
+        Gráficos baseados nos aportes validados. Use a leitura como estudo de composição, não como recomendação.
+      </Text>
+
+      <View style={styles.chartModes}>
+        {modes.map((entry) => (
+          <ChartModeButton key={entry.key} label={entry.label} active={mode === entry.key} onPress={() => setMode(entry.key)} testID={`chart-mode-${entry.key}`} />
+        ))}
+      </View>
+
+      {mode === 'overview' ? (
+        <View style={styles.chartStack}>
+          <View style={styles.chartMetricRow}>
+            <ChartMetric label="Patrimônio" value={formatCurrency(summary.totalAmount)} color="#34D399" />
+            <ChartMetric label="Diversificação" value={`${analytics.diversificationScore}%`} color="#5AC8FA" />
+          </View>
+          <Text style={styles.chartTitle}>Evolução acumulada</Text>
+          <EvolutionChart timeline={analytics.timeline} />
+          <View style={styles.monthBars}>
+            {analytics.monthly.slice(-6).map((entry, index) => (
+              <View key={entry.key} style={styles.monthColumn}>
+                <View style={styles.monthTrack}>
+                  <View style={[styles.monthFill, { height: `${Math.max(6, Math.round(entry.percentage * 100))}%`, backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
+                </View>
+                <Text style={styles.monthLabel}>{entry.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : mode === 'allocation' ? (
+        <View style={styles.chartStack}>
+          <View style={styles.chartMetricRow}>
+            <ChartMetric label="Classes" value={String(analytics.categories.length)} color="#34D399" />
+            <ChartMetric label="Produtos" value={String(analytics.types.length)} color="#FFD166" />
+          </View>
+          <Text style={styles.chartTitle}>Distribuição por classe</Text>
+          <SegmentedAllocation entries={analytics.categories} />
+          <Text style={styles.chartTitle}>Maiores posições</Text>
+          <TypeBars types={analytics.types} />
+        </View>
+      ) : (
+        <View style={styles.chartStack}>
+          <View style={styles.chartMetricRow}>
+            <ChartMetric label="Risco" value={`${analytics.riskScore}%`} color="#FB7185" />
+            <ChartMetric label="Concentração" value={`${analytics.concentrationScore}%`} color="#F5C64F" />
+          </View>
+          <Text style={styles.chartTitle}>Mapa risco x peso</Text>
+          <RiskMap types={analytics.types} />
+          <Text style={styles.chartTitle}>Exposição por risco</Text>
+          <RiskBars risk={analytics.risk} />
+          <ScoreRow label="Diversificação" value={analytics.diversificationScore} color="#5AC8FA" />
+          <ScoreRow label="Concentração" value={analytics.concentrationScore} color="#F5C64F" />
+          <ScoreRow label="Risco estimado" value={analytics.riskScore} color="#FB7185" />
+        </View>
+      )}
+
+      <View style={styles.insightBox}>
+        <MaterialCommunityIcons name="lightbulb-on-outline" size={18} color="#FFD166" />
+        <Text style={styles.insightText}>{analytics.insight}</Text>
+      </View>
+    </View>
+  );
+}
+
 function ProfileView({ state, summary, power, levelState, onExportCsv }) {
   const race = CHARACTER_RACES.find((entry) => entry.key === state.player.race) || CHARACTER_RACES[0];
   const characterClass = CHARACTER_CLASSES.find((entry) => entry.key === state.player.classKey) || CHARACTER_CLASSES[0];
@@ -972,6 +1274,8 @@ function ProfileView({ state, summary, power, levelState, onExportCsv }) {
           <StatTile icon="cash" label="Aportes" value={String(summary.count)} color="#FF8A9A" />
         </View>
       </View>
+
+      <PortfolioCharts history={state.history} summary={summary} />
 
       <View style={styles.panel}>
         <SectionHeader eyebrow="Relatório" title="Histórico validado" right={<GhostButton compact icon="file-delimited" onPress={onExportCsv}>CSV</GhostButton>} />
@@ -2170,6 +2474,320 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
     lineHeight: 17,
+  },
+  chartModes: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: '#090E15',
+    borderRadius: 14,
+    padding: 4,
+  },
+  chartModeButton: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chartModeButtonActive: {
+    backgroundColor: '#0F766E',
+  },
+  chartModeText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  chartModeTextActive: {
+    color: '#FFFFFF',
+  },
+  chartStack: {
+    gap: 12,
+  },
+  chartMetricRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  chartMetric: {
+    flex: 1,
+    minHeight: 74,
+    borderRadius: 14,
+    backgroundColor: '#090E15',
+    padding: 11,
+    gap: 4,
+  },
+  chartMetricDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  chartMetricLabel: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  chartMetricValue: {
+    color: '#F8FAFC',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  chartTitle: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  emptyChart: {
+    minHeight: 156,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#090E15',
+    borderRadius: 14,
+    padding: 16,
+  },
+  evolutionChart: {
+    height: 170,
+    borderRadius: 14,
+    backgroundColor: '#090E15',
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    paddingBottom: 8,
+    overflow: 'hidden',
+  },
+  evolutionGrid: {
+    position: 'absolute',
+    top: 16,
+    right: 10,
+    bottom: 32,
+    left: 10,
+    justifyContent: 'space-between',
+  },
+  evolutionGridLine: {
+    height: 1,
+    backgroundColor: '#1F2937',
+  },
+  evolutionBars: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  evolutionColumn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    gap: 6,
+  },
+  evolutionTrack: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  evolutionBar: {
+    width: '58%',
+    borderRadius: 99,
+  },
+  evolutionDot: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    backgroundColor: '#090E15',
+  },
+  evolutionLabel: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  monthBars: {
+    minHeight: 78,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  monthColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  monthTrack: {
+    height: 54,
+    width: '100%',
+    borderRadius: 10,
+    backgroundColor: '#090E15',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  monthFill: {
+    width: '100%',
+    borderRadius: 10,
+  },
+  monthLabel: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  allocationStack: {
+    gap: 10,
+  },
+  segmentedTrack: {
+    height: 22,
+    flexDirection: 'row',
+    borderRadius: 99,
+    overflow: 'hidden',
+    backgroundColor: '#090E15',
+  },
+  segmentedPart: {
+    minWidth: 5,
+  },
+  legendList: {
+    gap: 8,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  legendDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  legendLabel: {
+    flex: 1,
+    color: '#CBD5E1',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  legendValue: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  typeBars: {
+    gap: 10,
+  },
+  typeBarRow: {
+    gap: 7,
+  },
+  typeBarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  typeBarTitle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  typeBarLabel: {
+    flex: 1,
+    color: '#CBD5E1',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  typeBarValue: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  typeBarTrack: {
+    height: 9,
+    borderRadius: 99,
+    overflow: 'hidden',
+    backgroundColor: '#172033',
+  },
+  typeBarFill: {
+    height: '100%',
+    borderRadius: 99,
+  },
+  riskMap: {
+    height: 176,
+    borderRadius: 14,
+    backgroundColor: '#090E15',
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    overflow: 'hidden',
+  },
+  riskMapAxisVertical: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '50%',
+    width: 1,
+    backgroundColor: '#1F2937',
+  },
+  riskMapAxisHorizontal: {
+    position: 'absolute',
+    right: 0,
+    left: 0,
+    bottom: '50%',
+    height: 1,
+    backgroundColor: '#1F2937',
+  },
+  riskMapLabel: {
+    position: 'absolute',
+    color: '#64748B',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  riskMapLabelTop: {
+    top: 8,
+    left: 10,
+  },
+  riskMapLabelBottom: {
+    bottom: 8,
+    left: 10,
+  },
+  riskMapLabelLeft: {
+    bottom: 8,
+    left: 10,
+  },
+  riskMapLabelRight: {
+    bottom: 8,
+    right: 10,
+  },
+  riskBubble: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: '#090E15',
+    transform: [{ translateX: -10 }, { translateY: 10 }],
+  },
+  scoreRow: {
+    gap: 6,
+  },
+  scoreTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  scoreLabel: {
+    color: '#CBD5E1',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  scoreValue: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  insightBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+    borderRadius: 14,
+    backgroundColor: '#171307',
+    padding: 11,
+  },
+  insightText: {
+    flex: 1,
+    color: '#FDE68A',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
   },
   profileHeader: {
     flexDirection: 'row',
