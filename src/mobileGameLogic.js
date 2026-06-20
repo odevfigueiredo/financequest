@@ -551,6 +551,8 @@ export function buildPortfolioAnalytics(history = []) {
     timeline.push({
       id: entry.id || `${entry.typeKey}-${entry.createdAt}-${timeline.length}`,
       label: toShortDateLabel(entry.date),
+      category: categoryKey,
+      typeKey: entry.typeKey,
       amount: entry.amount,
       cumulativeAmount,
       cumulativeXp,

@@ -140,6 +140,15 @@ function formatMultiplier(value = 1) {
   return `${Number(value || 1).toFixed(2).replace('.', ',')}x`;
 }
 
+function formatCompactCurrency(value = 0, currency = 'BRL') {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency,
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(Number(value || 0));
+}
+
 function getCategoryLabel(categoryKey) {
   return INVESTMENT_CATEGORIES.find((entry) => entry.key === categoryKey)?.label || 'Categoria';
 }
@@ -999,31 +1008,231 @@ function EmptyChartState() {
 }
 
 function EvolutionChart({ timeline }) {
+  const [plotWidth, setPlotWidth] = useState(0);
+
   if (!timeline.length) {
     return <EmptyChartState />;
   }
 
   const points = timeline.slice(-7);
+  const latestPoint = points[points.length - 1];
+  const firstPoint = points[0];
+  const totalGrowth = Math.max(0, latestPoint.cumulativeAmount - firstPoint.cumulativeAmount);
   const maxValue = Math.max(...points.map((point) => point.cumulativeAmount), 1);
+  const chartHeight = 146;
+  const topInset = 12;
+  const bottomInset = 16;
+  const baseline = chartHeight - bottomInset;
+  const sideInset = points.length > 1 ? 18 : Math.max(18, plotWidth / 2);
+  const usableWidth = Math.max(0, plotWidth - sideInset * 2);
+  const usableHeight = chartHeight - topInset - bottomInset;
+  const coordinates = points.map((point, index) => {
+    const x = points.length === 1 ? plotWidth / 2 : sideInset + (usableWidth * index) / Math.max(1, points.length - 1);
+    const y = topInset + (1 - point.cumulativeAmount / maxValue) * usableHeight;
+
+    return { ...point, x, y };
+  });
+  const latestCoordinate = coordinates[coordinates.length - 1];
+  const latestBadgeWidth = 88;
+  const latestBadgeLeft = latestCoordinate
+    ? Math.max(0, Math.min(plotWidth - latestBadgeWidth, latestCoordinate.x - latestBadgeWidth + 14))
+    : 0;
+  const latestBadgeTop = latestCoordinate ? Math.max(4, latestCoordinate.y - 36) : 0;
 
   return (
-    <View style={styles.evolutionChart}>
-      <View style={styles.evolutionGrid}>
-        {[0, 1, 2].map((line) => (
-          <View key={line} style={styles.evolutionGridLine} />
+    <LinearGradient colors={['#08131F', '#071B22', '#061C18']} style={styles.evolutionChart}>
+      <View style={styles.evolutionSummaryRow}>
+        <View style={styles.evolutionSummaryText}>
+          <Text style={styles.evolutionEyebrow}>Total acumulado</Text>
+          <Text style={styles.evolutionTotal} numberOfLines={1}>
+            {formatCurrency(latestPoint.cumulativeAmount)}
+          </Text>
+        </View>
+        <View style={styles.evolutionTrendPill}>
+          <MaterialCommunityIcons name="trending-up" size={15} color="#051F18" />
+          <Text style={styles.evolutionTrendText} numberOfLines={1}>
+            +{formatCompactCurrency(latestPoint.amount)}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.evolutionPlotRow}>
+        <View style={styles.evolutionAxis}>
+          <Text style={styles.evolutionAxisLabel} numberOfLines={1}>
+            {formatCompactCurrency(maxValue)}
+          </Text>
+          <Text style={styles.evolutionAxisLabel} numberOfLines={1}>
+            {formatCompactCurrency(maxValue / 2)}
+          </Text>
+          <Text style={styles.evolutionAxisLabel} numberOfLines={1}>
+            R$ 0
+          </Text>
+        </View>
+
+        <View
+          style={[styles.evolutionPlot, { height: chartHeight }]}
+          onLayout={(event) => setPlotWidth(Math.round(event.nativeEvent.layout.width))}
+        >
+          {[12, 50, 88].map((line) => (
+            <View key={line} style={[styles.evolutionGridLine, { top: `${line}%` }]} />
+          ))}
+
+          {plotWidth > 0
+            ? coordinates.map((point, index) => {
+                const color = getChartColor(point.category, index);
+                const columnWidth = Math.max(22, Math.min(46, plotWidth / Math.max(1, points.length) * 0.72));
+                const left = Math.max(0, Math.min(plotWidth - columnWidth, point.x - columnWidth / 2));
+
+                return (
+                  <LinearGradient
+                    key={`${point.id}-area`}
+                    colors={[`${color}44`, `${color}08`]}
+                    style={[
+                      styles.evolutionAreaColumn,
+                      {
+                        left,
+                        top: point.y,
+                        width: columnWidth,
+                        height: Math.max(2, baseline - point.y),
+                      },
+                    ]}
+                  />
+                );
+              })
+            : null}
+
+          {plotWidth > 0
+            ? coordinates.slice(1).map((point, index) => {
+                const previous = coordinates[index];
+                const dx = point.x - previous.x;
+                const dy = point.y - previous.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+                return (
+                  <View
+                    key={`${previous.id}-${point.id}`}
+                    style={[
+                      styles.evolutionLineSegment,
+                      {
+                        left: previous.x + dx / 2 - length / 2,
+                        top: previous.y + dy / 2 - 2,
+                        width: length,
+                        transform: [{ rotate: `${angle}deg` }],
+                      },
+                    ]}
+                  />
+                );
+              })
+            : null}
+
+          {plotWidth > 0
+            ? coordinates.map((point, index) => {
+                const color = getChartColor(point.category, index);
+
+                return (
+                  <View
+                    key={`${point.id}-point`}
+                    style={[
+                      styles.evolutionPoint,
+                      {
+                        left: point.x - 7,
+                        top: point.y - 7,
+                        borderColor: color,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.evolutionPointCore, { backgroundColor: color }]} />
+                  </View>
+                );
+              })
+            : null}
+
+          {plotWidth > 0 && latestCoordinate ? (
+            <View
+              style={[
+                styles.evolutionLatestBadge,
+                {
+                  left: latestBadgeLeft,
+                  top: latestBadgeTop,
+                  width: latestBadgeWidth,
+                },
+              ]}
+            >
+              <Text style={styles.evolutionLatestBadgeText} numberOfLines={1}>
+                {formatCompactCurrency(latestPoint.cumulativeAmount)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.evolutionLabels}>
+        {points.map((point) => (
+          <Text key={`${point.id}-label`} style={styles.evolutionLabel} numberOfLines={1}>
+            {point.label}
+          </Text>
         ))}
       </View>
-      <View style={styles.evolutionBars}>
-        {points.map((point, index) => {
-          const height = Math.max(8, Math.round((point.cumulativeAmount / maxValue) * 100));
+
+      <View style={styles.evolutionFooter}>
+        <View style={[styles.evolutionFooterItem, styles.evolutionFooterItemWide]}>
+          <Text style={styles.evolutionFooterLabel}>Crescimento</Text>
+          <Text style={styles.evolutionFooterValue} numberOfLines={1}>
+            +{formatCompactCurrency(totalGrowth)}
+          </Text>
+        </View>
+        <View style={styles.evolutionFooterItem}>
+          <Text style={styles.evolutionFooterLabel}>Registros</Text>
+          <Text style={styles.evolutionFooterValue}>{timeline.length}</Text>
+        </View>
+        <View style={styles.evolutionFooterItem}>
+          <Text style={styles.evolutionFooterLabel}>XP</Text>
+          <Text style={styles.evolutionFooterValue} numberOfLines={1}>
+            {formatCompact(latestPoint.cumulativeXp)}
+          </Text>
+        </View>
+      </View>
+    </LinearGradient>
+  );
+}
+
+function MonthlyContributionChart({ monthly }) {
+  const entries = monthly.slice(-6);
+
+  if (!entries.length) {
+    return null;
+  }
+
+  return (
+    <View style={styles.monthChart}>
+      <View style={styles.monthHeader}>
+        <Text style={styles.chartTitle}>Aportes por mês</Text>
+        <Text style={styles.monthHeaderMeta}>{entries.length} meses</Text>
+      </View>
+      <View style={styles.monthBars}>
+        {entries.map((entry, index) => {
           const color = CHART_COLORS[index % CHART_COLORS.length];
+
           return (
-            <View key={point.id} style={styles.evolutionColumn}>
-              <View style={styles.evolutionTrack}>
-                <View style={[styles.evolutionBar, { height: `${height}%`, backgroundColor: color }]} />
-                <View style={[styles.evolutionDot, { borderColor: color }]} />
+            <View key={entry.key} style={styles.monthColumn}>
+              <Text style={styles.monthAmount} numberOfLines={1}>
+                {formatCompactCurrency(entry.amount)}
+              </Text>
+              <View style={styles.monthTrack}>
+                <LinearGradient
+                  colors={[`${color}44`, color]}
+                  style={[
+                    styles.monthFill,
+                    {
+                      height: `${Math.max(8, Math.round(entry.percentage * 100))}%`,
+                    },
+                  ]}
+                />
               </View>
-              <Text style={styles.evolutionLabel}>{point.label}</Text>
+              <Text style={styles.monthLabel} numberOfLines={1}>
+                {entry.label}
+              </Text>
             </View>
           );
         })}
@@ -1202,16 +1411,7 @@ function PortfolioCharts({ history, summary }) {
           </View>
           <Text style={styles.chartTitle}>Evolução acumulada</Text>
           <EvolutionChart timeline={analytics.timeline} />
-          <View style={styles.monthBars}>
-            {analytics.monthly.slice(-6).map((entry, index) => (
-              <View key={entry.key} style={styles.monthColumn}>
-                <View style={styles.monthTrack}>
-                  <View style={[styles.monthFill, { height: `${Math.max(6, Math.round(entry.percentage * 100))}%`, backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
-                </View>
-                <Text style={styles.monthLabel}>{entry.label}</Text>
-              </View>
-            ))}
-          </View>
+          <MonthlyContributionChart monthly={analytics.monthly} />
         </View>
       ) : mode === 'allocation' ? (
         <View style={styles.chartStack}>
@@ -2545,83 +2745,218 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   evolutionChart: {
-    height: 170,
-    borderRadius: 14,
-    backgroundColor: '#090E15',
-    paddingHorizontal: 10,
-    paddingTop: 12,
-    paddingBottom: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#173246',
+    padding: 12,
+    gap: 12,
     overflow: 'hidden',
   },
-  evolutionGrid: {
-    position: 'absolute',
-    top: 16,
-    right: 10,
-    bottom: 32,
-    left: 10,
-    justifyContent: 'space-between',
-  },
-  evolutionGridLine: {
-    height: 1,
-    backgroundColor: '#1F2937',
-  },
-  evolutionBars: {
-    flex: 1,
+  evolutionSummaryRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  evolutionSummaryText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  evolutionEyebrow: {
+    color: '#7DDCC8',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  evolutionTotal: {
+    color: '#F8FAFC',
+    fontSize: 23,
+    lineHeight: 28,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  evolutionTrendPill: {
+    minHeight: 32,
+    maxWidth: 118,
+    borderRadius: 99,
+    backgroundColor: '#A7F3D0',
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  evolutionTrendText: {
+    flexShrink: 1,
+    color: '#051F18',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  evolutionPlotRow: {
+    flexDirection: 'row',
     gap: 8,
   },
-  evolutionColumn: {
-    flex: 1,
-    height: '100%',
-    alignItems: 'center',
-    gap: 6,
+  evolutionAxis: {
+    width: 54,
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingVertical: 3,
   },
-  evolutionTrack: {
-    flex: 1,
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  evolutionBar: {
-    width: '58%',
-    borderRadius: 99,
-  },
-  evolutionDot: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-    backgroundColor: '#090E15',
-  },
-  evolutionLabel: {
-    color: '#94A3B8',
+  evolutionAxisLabel: {
+    color: '#708499',
     fontSize: 10,
     fontWeight: '800',
   },
+  evolutionPlot: {
+    flex: 1,
+    position: 'relative',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#142536',
+    backgroundColor: 'rgba(5, 12, 20, 0.74)',
+    overflow: 'hidden',
+  },
+  evolutionGridLine: {
+    position: 'absolute',
+    right: 0,
+    left: 0,
+    height: 1,
+    backgroundColor: 'rgba(148, 163, 184, 0.14)',
+  },
+  evolutionAreaColumn: {
+    position: 'absolute',
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+  },
+  evolutionLineSegment: {
+    position: 'absolute',
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: '#A7F3D0',
+  },
+  evolutionPoint: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    backgroundColor: '#06121C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  evolutionPointCore: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  evolutionLatestBadge: {
+    position: 'absolute',
+    minHeight: 26,
+    borderRadius: 99,
+    backgroundColor: '#E7FFF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  evolutionLatestBadgeText: {
+    color: '#05251D',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  evolutionLabels: {
+    flexDirection: 'row',
+    gap: 4,
+    paddingLeft: 62,
+  },
+  evolutionLabel: {
+    flex: 1,
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  evolutionFooter: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  evolutionFooterItem: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(125, 220, 200, 0.16)',
+    backgroundColor: 'rgba(8, 19, 31, 0.78)',
+    padding: 9,
+    justifyContent: 'center',
+  },
+  evolutionFooterItemWide: {
+    flex: 1.42,
+  },
+  evolutionFooterLabel: {
+    color: '#7E93A7',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  evolutionFooterValue: {
+    color: '#F8FAFC',
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  monthChart: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#162636',
+    backgroundColor: '#081019',
+    padding: 12,
+    gap: 10,
+  },
+  monthHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  monthHeaderMeta: {
+    color: '#7E93A7',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
   monthBars: {
-    minHeight: 78,
+    minHeight: 104,
     flexDirection: 'row',
     gap: 8,
     alignItems: 'flex-end',
   },
   monthColumn: {
     flex: 1,
+    minWidth: 0,
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
+  },
+  monthAmount: {
+    color: '#CBD5E1',
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   monthTrack: {
-    height: 54,
+    height: 68,
     width: '100%',
-    borderRadius: 10,
-    backgroundColor: '#090E15',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#142536',
+    backgroundColor: '#0A1520',
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
   monthFill: {
     width: '100%',
-    borderRadius: 10,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   monthLabel: {
     color: '#94A3B8',
